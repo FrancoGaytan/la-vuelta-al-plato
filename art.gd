@@ -1039,6 +1039,261 @@ static func draw_logo(ci: CanvasItem, c: Vector2, s: float, time: float) -> void
 	arc_text(ci, c, rib_r - 9 * s, "LA VUELTA AL PLATO", int(30 * s), Color("fdf6e3"), PI / 2.0, int(3 * s), Color("6a1a12"), true)
 
 
+# =====================================================================
+# Lavado: utensilios, pileta, esponja y escurridor
+# =====================================================================
+
+## Un utensilio. dirt (0-1) = cuánta mugre tiene; foam (0-1) = espuma; shine = recién lavado.
+static func draw_tool(ci: CanvasItem, rect: Rect2, kind: String, dirt := 0.0, foam := 0.0, shine := false, seed := 1) -> void:
+	var c := rect.get_center()
+	var s := minf(rect.size.x, rect.size.y)
+	match kind:
+		"plato":
+			draw_tex(ci, tex("kitchen/plate"), rect)
+		"olla":
+			draw_tex(ci, tex("kitchen/pot"), rect)
+		"tabla":
+			draw_tex(ci, tex("kitchen/board"), rect.grow(-s * 0.05))
+		"espatula":
+			ci.draw_set_transform(c, -0.6, Vector2.ONE)
+			rrect(ci, Rect2(Vector2(-s * 0.06, s * 0.02), Vector2(s * 0.12, s * 0.45)), Color("5a3a22"), 4)
+			rrect(ci, Rect2(Vector2(-s * 0.18, -s * 0.42), Vector2(s * 0.36, s * 0.42)), Color("c5ccd2"), 5, Color("8d98a3"), 2)
+			for k in 3:
+				ci.draw_line(Vector2(-s * 0.1 + k * s * 0.1, -s * 0.36), Vector2(-s * 0.1 + k * s * 0.1, -s * 0.06), Color("8d98a3"), 2)
+			ci.draw_set_transform(Vector2.ZERO, 0, Vector2.ONE)
+		"canasto":
+			var b := Rect2(c - Vector2(s * 0.36, s * 0.28), Vector2(s * 0.72, s * 0.56))
+			for k in 7:
+				ci.draw_line(Vector2(b.position.x + k * b.size.x / 6.0, b.position.y), Vector2(b.position.x + k * b.size.x / 6.0, b.end.y), Color("6b737b"), 1.5)
+			for k in 6:
+				ci.draw_line(Vector2(b.position.x, b.position.y + k * b.size.y / 5.0), Vector2(b.end.x, b.position.y + k * b.size.y / 5.0), Color("6b737b"), 1.5)
+			ci.draw_rect(b, Color("4a5056"), false, 3)
+			ci.draw_line(Vector2(b.end.x, c.y), Vector2(rect.end.x, c.y - s * 0.1), Color("2b2d31"), 5)
+		"bandeja":
+			rrect(ci, Rect2(c - Vector2(s * 0.42, s * 0.28), Vector2(s * 0.84, s * 0.56)), Color("8d98a3"), 5, Color("6b737b"), 2)
+			rrect(ci, Rect2(c - Vector2(s * 0.36, s * 0.22), Vector2(s * 0.72, s * 0.44)), Color("aab3ba"), 4)
+		"pala":
+			ci.draw_set_transform(c, -0.7, Vector2.ONE)
+			rrect(ci, Rect2(Vector2(-s * 0.05, 0), Vector2(s * 0.1, s * 0.48)), Color("8a5a34"), 3)
+			ci.draw_circle(Vector2(0, -s * 0.18), s * 0.28, Color("d9a86a"))
+			ci.draw_arc(Vector2(0, -s * 0.18), s * 0.28, 0, TAU, 24, Color("a87a44"), 2)
+			ci.draw_set_transform(Vector2.ZERO, 0, Vector2.ONE)
+	# Mugre: manchas de grasa y restos de comida
+	if dirt > 0.02:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = seed * 17 + kind.hash()
+		for k in int(14 * dirt) + 2:
+			var p := c + Vector2(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.25, 0.25)) * s
+			var col: Color = [Color(0.45, 0.28, 0.12), Color(0.7, 0.25, 0.12), Color(0.55, 0.45, 0.2)][k % 3]
+			ellipse(ci, p, Vector2(rng.randf_range(3, 9), rng.randf_range(2, 6)) * s / 80.0, Color(col, 0.55 * dirt + 0.15))
+	if foam > 0.02:
+		var rng2 := RandomNumberGenerator.new()
+		rng2.seed = seed
+		for k in int(26 * foam):
+			var p := c + Vector2(rng2.randf_range(-0.34, 0.34), rng2.randf_range(-0.28, 0.28)) * s
+			ci.draw_circle(p, rng2.randf_range(3, 7) * s / 90.0, Color(1, 1, 1, 0.85))
+			ci.draw_arc(p, rng2.randf_range(3, 7) * s / 90.0, 0, TAU, 10, Color(0.75, 0.85, 0.95, 0.8), 1.0)
+	if shine:
+		var t := Time.get_ticks_msec() / 1000.0
+		for k in 3:
+			var p := c + Vector2.from_angle(k * 2.1 + t) * s * 0.25
+			var r := s * 0.05 * (0.6 + 0.4 * sin(t * 4.0 + k))
+			ci.draw_line(p - Vector2(r, 0), p + Vector2(r, 0), Color(1, 1, 1, 0.9), 2)
+			ci.draw_line(p - Vector2(0, r), p + Vector2(0, r), Color(1, 1, 1, 0.9), 2)
+
+
+static func draw_sponge(ci: CanvasItem, rect: Rect2, tilt := 0.0) -> void:
+	var c := rect.get_center()
+	var s := minf(rect.size.x, rect.size.y * 2.2)
+	ci.draw_set_transform(c, tilt, Vector2.ONE)
+	rrect(ci, Rect2(Vector2(-s * 0.36, -s * 0.18), Vector2(s * 0.72, s * 0.24)), Color("f2d24a"), 6, Color("c9a81e"), 2)
+	rrect(ci, Rect2(Vector2(-s * 0.36, s * 0.04), Vector2(s * 0.72, s * 0.14)), Color("3f9a48"), 4)
+	for k in 6:
+		ci.draw_circle(Vector2(-s * 0.26 + k * s * 0.1, -s * 0.06 + (k % 2) * 4), 2, Color("d9b632"))
+	ci.draw_set_transform(Vector2.ZERO, 0, Vector2.ONE)
+
+
+## Pileta con grifo. water = si sale agua.
+static func draw_sink(ci: CanvasItem, rect: Rect2, water: bool, time: float) -> void:
+	var basin := Rect2(rect.position + Vector2(0, rect.size.y * 0.25), Vector2(rect.size.x, rect.size.y * 0.75))
+	rrect(ci, Rect2(basin.position + Vector2(4, 8), basin.size), Color(0, 0, 0, 0.3), 18)
+	rrect(ci, basin, Color("c5ccd2"), 18, Color("8d98a3"), 4)
+	rrect(ci, basin.grow(-16), Color("8d98a3"), 14)
+	grad_rect(ci, basin.grow(-22), Color("aab3ba"), Color("7d8790"))
+	ci.draw_circle(basin.get_center() + Vector2(0, basin.size.y * 0.28), 10, Color("4a5056"))
+	ci.draw_circle(basin.get_center() + Vector2(0, basin.size.y * 0.28), 6, Color("2b2d31"))
+	# Grifo
+	var base := Vector2(rect.get_center().x, basin.position.y + 6)
+	rrect(ci, Rect2(base + Vector2(-18, -10), Vector2(36, 16)), Color("aab3ba"), 6, Color("7d8790"), 2)
+	ci.draw_line(base + Vector2(0, -6), base + Vector2(0, -rect.size.y * 0.2), Color("c5ccd2"), 12)
+	ci.draw_arc(base + Vector2(26, -rect.size.y * 0.2), 26, PI, PI * 2.0, 16, Color("c5ccd2"), 12)
+	ci.draw_line(base + Vector2(52, -rect.size.y * 0.2), base + Vector2(52, -rect.size.y * 0.2 + 18), Color("c5ccd2"), 12)
+	ci.draw_arc(base + Vector2(26, -rect.size.y * 0.2), 26, PI * 1.1, PI * 1.5, 8, Color(1, 1, 1, 0.6), 3)
+	# Manija (roja = cerrada, azul = abierta)
+	var handle := base + Vector2(-40, -18)
+	ci.draw_circle(handle, 13, Color("3a7fd0") if water else Color("c8463c"))
+	ci.draw_line(handle + Vector2(-9, 0), handle + Vector2(9, 0), Color(1, 1, 1, 0.8), 3)
+	if water:
+		var mouth := base + Vector2(52, -rect.size.y * 0.2 + 22)
+		var bottom := basin.get_center().y + 10
+		for k in 4:
+			var x := mouth.x - 4 + k * 2.6 + sin(time * 30.0 + k) * 0.8
+			ci.draw_line(Vector2(x, mouth.y), Vector2(x, bottom), Color(0.7, 0.88, 1.0, 0.55), 2.0)
+		for k in 6:
+			var ph := fmod(time * 2.0 + k / 6.0, 1.0)
+			ci.draw_arc(Vector2(mouth.x, bottom), 6 + ph * 30, PI * 1.1, PI * 1.9, 10, Color(1, 1, 1, 0.5 * (1.0 - ph)), 1.5)
+
+
+## Escurridor de platos (alambre)
+static func draw_rack(ci: CanvasItem, rect: Rect2) -> void:
+	rrect(ci, Rect2(rect.position + Vector2(3, 6), rect.size), Color(0, 0, 0, 0.2), 10)
+	rrect(ci, Rect2(rect.position + Vector2(0, rect.size.y - 18), Vector2(rect.size.x, 18)), Color("9aa3ab"), 6)
+	for k in 9:
+		var x := rect.position.x + 10 + k * (rect.size.x - 20) / 8.0
+		ci.draw_line(Vector2(x, rect.position.y + 20), Vector2(x, rect.end.y - 14), Color("8d98a3"), 3)
+	ci.draw_line(Vector2(rect.position.x + 6, rect.position.y + 20), Vector2(rect.end.x - 6, rect.position.y + 20), Color("8d98a3"), 3)
+
+
+# =====================================================================
+# Salón italiano (Trattoria del Forno)
+# =====================================================================
+
+static func draw_dining_italia(ci: CanvasItem, rect: Rect2, menu: Array, time: float, decor: Array) -> void:
+	var o := rect.position
+	# Pared de estuco ocre con manchas, vigas de madera y zócalo de terracota
+	grad_rect(ci, rect, Color("eabf86"), Color("d69e62"))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9
+	for k in 40:
+		ellipse(ci, o + Vector2(rng.randf() * rect.size.x, rng.randf() * 220), Vector2(rng.randf_range(20, 60), rng.randf_range(10, 30)),
+			Color(1, 1, 1, 0.05) if k % 2 == 0 else Color(0.5, 0.25, 0.1, 0.05))
+	ci.draw_rect(Rect2(o, Vector2(rect.size.x, 14)), Color("5a3a22"))
+	for x in range(40, int(rect.size.x), 220):
+		ci.draw_rect(Rect2(o + Vector2(x, 0), Vector2(26, 22)), Color("4a2e1a"))
+	tiles(ci, Rect2(o.x, o.y + 225, rect.size.x, rect.size.y - 225), Vector2(46, 46), Color("c0643a"), Color("8a3e22"), false)
+	ci.draw_rect(Rect2(o.x, o.y + 220, rect.size.x, 8), Color("7a4a24"))
+	# Puerta de madera con remaches y cartel APERTO
+	var d := Rect2(o.x + 30, o.y + 40, 150, 290)
+	var arch := PackedVector2Array()
+	for k in 17:
+		var a := PI + PI * k / 16.0
+		arch.append(Vector2(d.get_center().x, d.position.y + 60) + Vector2(cos(a) * 75, sin(a) * 50))
+	arch.append(Vector2(d.end.x, d.end.y))
+	arch.append(Vector2(d.position.x, d.end.y))
+	ci.draw_colored_polygon(arch, Color("6e4527"))
+	for k in 5:
+		ci.draw_line(Vector2(d.position.x + 10 + k * 32, d.position.y + 20), Vector2(d.position.x + 10 + k * 32, d.end.y), Color("5a3a22"), 2)
+	for k in 4:
+		for j in 3:
+			ci.draw_circle(Vector2(d.position.x + 28 + j * 48, d.position.y + 90 + k * 52), 3, Color("3a3a3a"))
+	ci.draw_circle(d.position + Vector2(128, 170), 6, Color("e3c26a"))
+	rrect(ci, Rect2(d.position + Vector2(28, 64), Vector2(94, 30)), Color("2f6f4f"), 6, Color("e8e0c8"), 2)
+	text(ci, d.position + Vector2(28, 85), "APERTO", 15, Color("f4efe0"), HORIZONTAL_ALIGNMENT_CENTER, 94)
+	# Ventana en arco con persianas verdes y Roma al atardecer
+	var w := Rect2(o.x + 330, o.y + 50, 420, 160)
+	var wpts := PackedVector2Array()
+	for k in 21:
+		var a := PI + PI * k / 20.0
+		wpts.append(Vector2(w.get_center().x, w.position.y + 60) + Vector2(cos(a) * w.size.x / 2.0, sin(a) * 60))
+	wpts.append(w.end)
+	wpts.append(Vector2(w.position.x, w.end.y))
+	for side in [-1, 1]:
+		var sx: float = w.position.x - 70 if side < 0 else w.end.x + 6
+		ci.draw_rect(Rect2(sx, w.position.y - 20, 64, w.size.y + 20), Color("3f7a4a"))
+		for k in 9:
+			ci.draw_line(Vector2(sx + 4, w.position.y - 14 + k * 18), Vector2(sx + 60, w.position.y - 14 + k * 18), Color("2f5a38"), 3)
+	var big := PackedVector2Array()
+	for p in wpts:
+		big.append(w.get_center() + (p - w.get_center()) * 1.06)
+	ci.draw_colored_polygon(big, Color("6e4527"))
+	ci.draw_colored_polygon(wpts, Color("f6b26b"))
+	ci.draw_circle(w.position + Vector2(300, 70), 26, Color(1, 0.92, 0.6, 0.9))
+	# Silueta de Roma: Coliseo, cúpula y cipreses
+	var ground := w.end.y
+	ci.draw_colored_polygon(PackedVector2Array([Vector2(w.position.x + 230, w.position.y + 74), Vector2(w.position.x + 300, w.position.y + 90),
+		Vector2(w.position.x + 370, w.position.y + 74), Vector2(w.position.x + 370, ground), Vector2(w.position.x + 230, ground)]), Color("e09a5a"))
+	ci.draw_circle(Vector2(w.position.x + 300, w.position.y + 78), 30, Color("e09a5a"))
+	var col_x := w.position.x + 40
+	ci.draw_rect(Rect2(col_x, w.position.y + 90, 170, ground - w.position.y - 90), Color("d08848"))
+	for row in 3:
+		for k in 8:
+			var ax := col_x + 8 + k * 20.0
+			var ay := w.position.y + 100 + row * 22.0
+			ci.draw_rect(Rect2(ax, ay + 6, 12, 14), Color("8a4a24"))
+			ci.draw_circle(Vector2(ax + 6, ay + 6), 6, Color("8a4a24"))
+	for cx in [w.position.x + 222, w.position.x + 390, w.position.x + 405]:
+		ellipse(ci, Vector2(cx, ground - 34), Vector2(8, 34), Color("3f5a2a"))
+	ci.draw_line(Vector2(w.get_center().x, w.position.y), Vector2(w.get_center().x, w.end.y), Color("6e4527"), 6)
+	# Estante con botellas de vino (con canasto de paja)
+	var sh := Rect2(o.x + 790, o.y + 150, 80, 8)
+	ci.draw_rect(sh, Color("5a3a22"))
+	for k in 3:
+		var bx := sh.position.x + 14 + k * 26
+		ellipse(ci, Vector2(bx, sh.position.y - 12), Vector2(11, 13), Color("d9b36a"))
+		for j in 4:
+			ci.draw_line(Vector2(bx - 10, sh.position.y - 18 + j * 4), Vector2(bx + 10, sh.position.y - 18 + j * 4), Color("b08a42"), 1)
+		ci.draw_rect(Rect2(bx - 3, sh.position.y - 44, 6, 22), Color("3a5a2a"))
+		ci.draw_rect(Rect2(bx - 3, sh.position.y - 48, 6, 5), Color("8a2018"))
+	# Ristras de ajo y ají colgando
+	for x in [205.0, 1245.0]:
+		ci.draw_line(o + Vector2(x, 14), o + Vector2(x, 120), Color("8a6a3a"), 2)
+		for k in 6:
+			var p := o + Vector2(x + (6 if k % 2 == 0 else -6), 30 + k * 16)
+			if x < 600:
+				ci.draw_circle(p, 8, Color("f6efe0"))
+				ci.draw_line(p + Vector2(0, -8), p + Vector2(0, -12), Color("d9cdb4"), 2)
+			else:
+				ci.draw_colored_polygon(PackedVector2Array([p + Vector2(-4, -6), p + Vector2(4, -6), p + Vector2(0, 12)]), Color("c8281e"))
+				ci.draw_line(p + Vector2(0, -6), p + Vector2(0, -10), Color("3f7a28"), 2)
+	# Banderines de Italia entre las lámparas
+	for k in 30:
+		var x := o.x + 230 + k * 34.0
+		if x > rect.end.x - 30:
+			break
+		var y := o.y + 22 + sin(k * 0.6) * 4
+		var colf: Color = [Color("009246"), Color("ffffff"), Color("ce2b37")][k % 3]
+		ci.draw_colored_polygon(PackedVector2Array([Vector2(x, y), Vector2(x + 26, y), Vector2(x + 13, y + 22)]), colf)
+	# Pizarra con el menú
+	var b := Rect2(o.x + 880, o.y + 30, 300, 188)
+	ci.draw_rect(b.grow(9), Color("5a3a22"))
+	ci.draw_rect(b, Color("2c3a33"))
+	text(ci, b.position + Vector2(0, 30), "MENÚ DEL GIORNO", 20, Color("f4f1e6"), HORIZONTAL_ALIGNMENT_CENTER, b.size.x)
+	for i in menu.size():
+		text(ci, b.position + Vector2(18, 62 + i * 24), "• " + str(menu[i]), 16, Color("e9f0dc"), HORIZONTAL_ALIGNMENT_LEFT, 270)
+	for x in [260, 640, 1220]:
+		lamp(ci, o.x + x, o.y + 14, 4, time)
+	if "plantas" in decor:
+		hanging_plant(ci, o + Vector2(840, 14), 0.8)
+	if "ventilador" in decor:
+		ceiling_fan(ci, o + Vector2(450, 14), time)
+
+
+## Frente del mostrador italiano: azulejos de mayólica
+static func draw_counter_italia(ci: CanvasItem, rect: Rect2, top: float) -> void:
+	var y := rect.position.y + top
+	var front := Rect2(rect.position.x, y + 18, rect.size.x, rect.end.y - y - 18)
+	ci.draw_rect(front, Color("e9e2d0"))
+	var size := 52.0
+	for row in int(front.size.y / size) + 1:
+		for col in int(front.size.x / size) + 1:
+			var p := front.position + Vector2(col * size, row * size)
+			var tr := Rect2(p + Vector2(2, 2), Vector2(size - 4, size - 4)).intersection(front)
+			if tr.size.x <= 0 or tr.size.y <= 0:
+				continue
+			ci.draw_rect(tr, Color("f7f2e4"))
+			var c := p + Vector2(size, size) / 2.0
+			if front.has_point(c):
+				ci.draw_circle(c, 14, Color("2f5f9f"))
+				ci.draw_circle(c, 9, Color("f7f2e4"))
+				ci.draw_circle(c, 4, Color("e3a53a"))
+				for k in 4:
+					var a := PI / 4.0 + k * PI / 2.0
+					ci.draw_circle(c + Vector2.from_angle(a) * 20, 4, Color("2f5f9f"))
+	grad_rect(ci, Rect2(rect.position.x, y, rect.size.x, 20), Color("7a4a24"), Color("5a3a22"))
+	ci.draw_rect(Rect2(rect.position.x, y + 3, rect.size.x, 2), Color(1, 1, 1, 0.25))
+	ci.draw_rect(Rect2(rect.position.x, y + 20, rect.size.x, 6), Color(0, 0, 0, 0.3))
+
+
 ## Bandera simplificada que flamea. flag = [tipo, colores] (ver Data.COUNTRIES)
 static func draw_flag(ci: CanvasItem, r: Rect2, flag: Array, t: float) -> void:
 	var kind: String = flag[0]
@@ -1126,9 +1381,9 @@ static func salt_shaker(ci: CanvasItem, c: Vector2, s: float, tilt: float, pouri
 
 ## Intro del día: la persiana del local sube, el cartel pasa a ABIERTO y aparece el nombre del día.
 ## p = progreso de 0 a 1.
-static func draw_day_intro(ci: CanvasItem, rect: Rect2, p: float, title: String, subtitle: String, time: float) -> void:
-	draw_dining(ci, rect, [], time)
-	draw_counter(ci, rect, rect.size.y - 250)
+static func draw_day_intro(ci: CanvasItem, rect: Rect2, p: float, title: String, subtitle: String, time: float, theme := "argentina") -> void:
+	draw_dining(ci, rect, [], time, [], theme)
+	draw_counter(ci, rect, rect.size.y - 250, theme)
 	# Persiana metálica que sube (de 0.1 a 0.55)
 	var up := clampf((p - 0.1) / 0.45, 0.0, 1.0)
 	up = up * up * (3.0 - 2.0 * up)
@@ -1212,7 +1467,10 @@ static func candy_jar(ci: CanvasItem, r: Rect2) -> void:
 
 
 ## Salón con ventana, puerta, pizarra con el menú y lámparas. decor = mejoras compradas que se ven.
-static func draw_dining(ci: CanvasItem, rect: Rect2, menu: Array, time: float, decor: Array = []) -> void:
+static func draw_dining(ci: CanvasItem, rect: Rect2, menu: Array, time: float, decor: Array = [], theme := "argentina") -> void:
+	if theme == "italia":
+		draw_dining_italia(ci, rect, menu, time, decor)
+		return
 	var o := rect.position
 	grad_rect(ci, rect, Color("f1dfbd"), Color("e2c79c"))
 	for i in int(rect.size.x / 48.0) + 1:
@@ -1282,7 +1540,10 @@ static func draw_dining(ci: CanvasItem, rect: Rect2, menu: Array, time: float, d
 
 
 ## Frente del mostrador (tapa de mármol + frente de madera). `top` es la altura de la tapa.
-static func draw_counter(ci: CanvasItem, rect: Rect2, top: float) -> void:
+static func draw_counter(ci: CanvasItem, rect: Rect2, top: float, theme := "argentina") -> void:
+	if theme == "italia":
+		draw_counter_italia(ci, rect, top)
+		return
 	var y := rect.position.y + top
 	ci.draw_rect(Rect2(rect.position.x, y + 18, rect.size.x, rect.end.y - y - 18), Color("6e4527"))
 	var rng := RandomNumberGenerator.new()

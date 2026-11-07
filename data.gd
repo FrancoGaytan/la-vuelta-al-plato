@@ -12,6 +12,24 @@ const LEAVE_FACTOR := 2.3      # si esperan más que paciencia x esto, se van y 
 const COOK_SLOW := 1.35       # ritmo de cocción: todo se cocina un 35% más lento que los tiempos de las recetas
 const SPRINKLE_TIME := 2.0   # segundos que hay que desparramar un topping sobre la comida
 
+# Lavado: cada utensilio que se usa queda sucio. Hay un stock limpio por día.
+# Si se acaba, se usa uno sucio (la comida o el plato bajan de nota).
+const TOOLS := {
+	"plato": {"name": "Plato", "stock": 6},
+	"olla": {"name": "Olla", "stock": 4},
+	"espatula": {"name": "Espátula", "stock": 3},
+	"canasto": {"name": "Canasto", "stock": 3},
+	"bandeja": {"name": "Bandeja", "stock": 3},
+	"pala": {"name": "Pala", "stock": 2},
+	"tabla": {"name": "Tabla", "stock": 5},
+}
+const TOOL_ORDER := ["plato", "olla", "espatula", "canasto", "bandeja", "pala", "tabla"]
+const TOOL_FOR := {"olla": "olla", "plancha": "espatula", "freidora": "canasto", "horno": "bandeja", "horno_lena": "pala"}
+const DIRTY_FOOD := 0.8       # cocinar con un utensilio sucio: la comida vale 80%
+const DIRTY_PLATE := 0.75     # servir en plato sucio: el plato vale 75%
+const DIRTY_REPUTATION := 2.5 # al cerrar, cada cosa sin lavar baja la reputación del día (máximo 30)
+const SCRUB_NEEDED := 900.0   # cuánto hay que frotar con la esponja (en píxeles de movimiento)
+
 # Salero: lo que va en la plancha o la olla (con "salt": true) se sala sacudiendo el salero encima.
 # 1.0 = bien salado (≈1 segundo de sacudir). Entre SALT_OK.x y SALT_OK.y está perfecto.
 const SALT_TIME := 1.0
@@ -46,10 +64,12 @@ const UPGRADES := {
 		"desc": "Una olla más: podés hervir 4 cosas a la vez."},
 	"procesadora": {"name": "Procesadora", "price": 80, "for": "Cocina",
 		"desc": "Las verduras se cortan con la mitad de cortes."},
+	"lavavajillas": {"name": "Lavavajillas", "price": 150, "for": "Cocina",
+		"desc": "Lava solo una cosa sucia cada 8 segundos (más lento que a mano)."},
 	"ayudante": {"name": "Ayudante de cocina", "price": 260, "for": "Cocina",
 		"desc": "Saca la comida del fuego justo en su punto: nunca más se quema nada."},
 }
-const UPGRADE_ORDER := ["caramelera", "plantas", "vajilla", "ventilador", "timbre", "procesadora", "hornalla", "reloj", "ayudante"]
+const UPGRADE_ORDER := ["caramelera", "plantas", "vajilla", "ventilador", "timbre", "procesadora", "hornalla", "lavavajillas", "reloj", "ayudante"]
 
 
 ## Temperatura interna (°C) de una carne después de t segundos de cocción.

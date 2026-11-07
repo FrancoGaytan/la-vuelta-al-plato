@@ -20,7 +20,10 @@ func _initialize() -> void:
 	_save(_sizzle(0.0), "res://assets/sfx/chisporroteo.wav")
 	_save(_fryer(), "res://assets/sfx/freidora.wav")
 	_save(_oven(), "res://assets/sfx/horno.wav")
+	_save(_tap_water(), "res://assets/sfx/canilla.wav", 0.6)
 	rate = SR_HI
+	_save(_scrub(), "res://assets/sfx/frotar.wav", 0.5)
+	rng.seed = 23
 	rng.seed = 23
 	_save(_cash(), "res://assets/sfx/caja.wav", 0.7)
 	_save(_door_bells(1.0), "res://assets/sfx/campanita.wav", 0.7)
@@ -34,6 +37,32 @@ func _initialize() -> void:
 	_save(_shutter(), "res://assets/sfx/persiana.wav", 0.5)
 	_save(_shaker(), "res://assets/sfx/salero.wav", 0.45)
 	quit()
+
+
+## Agua del grifo cayendo en la pileta (loop)
+func _tap_water() -> PackedFloat32Array:
+	var hiss := _highpass(_noise(), 0.25)
+	var body := _lowpass(_noise(), 0.08)
+	var wobble := _lowpass(_noise(), 0.002)
+	var buf := PackedFloat32Array()
+	buf.resize(_n())
+	for i in buf.size():
+		buf[i] = hiss[i] * (0.5 + 3.0 * absf(wobble[i])) + body[i] * 0.8
+	_bubbles(buf, 120, 500.0, 1400.0, 0.08)
+	return buf
+
+
+## Esponja frotando: un "fsh-fsh" corto
+func _scrub() -> PackedFloat32Array:
+	var buf := _one_shot(0.32)
+	for stroke in 2:
+		var s0 := int(stroke * 0.15 * rate)
+		var len := int(0.12 * rate)
+		var lp := 0.0
+		for k in len:
+			lp += 0.25 * (rng.randf_range(-1.0, 1.0) - lp)
+			_put(buf, s0 + k, lp * sin(PI * float(k) / len) * 0.8)
+	return buf
 
 
 ## Persiana metálica que sube: traqueteo de láminas que se va frenando

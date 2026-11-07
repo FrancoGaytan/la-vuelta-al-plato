@@ -12,11 +12,13 @@ const ApplianceView = preload("res://views/appliance_view.gd")
 const BoardView = preload("res://views/board_view.gd")
 const PlateView = preload("res://views/plate_view.gd")
 const MesaView = preload("res://views/pizza_mesa_view.gd")
+const SinkView = preload("res://views/sink_view.gd")
+const RackView = preload("res://views/rack_view.gd")
 const TrashView = preload("res://views/trash_view.gd")
 const WorldMap = preload("res://views/world_map.gd")
 
-const STATIONS := ["Pedidos", "Cocina", "Tabla", "Emplatado", "Entrega"]
-const TAB_ICONS := ["kitchen/notepad", "kitchen/pot", "kitchen/board", "kitchen/plate", "kitchen/bell"]
+const STATIONS := ["Pedidos", "Cocina", "Tabla", "Emplatado", "Entrega", "Bacha"]
+const TAB_ICONS := ["kitchen/notepad", "kitchen/pot", "kitchen/board", "kitchen/plate", "kitchen/bell", "kitchen/sponge"]
 const NAMES := ["Marta", "Rulo", "Doña Elsa", "Tano", "Vicky", "Pocho", "Lula", "Beto", "Chela", "Nacho",
 	"Cachi", "Mirta", "Gonza", "Rocío", "Don Aldo", "Flor"]
 const MAX_ACTIVE := 6
@@ -91,6 +93,7 @@ const ONE_SHOTS := {
 	"persiana": ["res://assets/sfx/persiana.wav", -17.0], # sube la persiana al abrir el día
 	"salero": ["res://assets/sfx/salero.wav", -20.0],     # sacudir el salero
 	"corte1": ["res://assets/sfx/corte1.wav", -16.0],     # cuchillo en la tabla (sutil)
+	"frotar": ["res://assets/sfx/frotar.wav", -18.0],     # esponja en la bacha
 	"corte2": ["res://assets/sfx/corte2.wav", -16.0],
 	"corte3": ["res://assets/sfx/corte3.wav", -16.0],
 }
@@ -109,6 +112,20 @@ var kitchen_views: Array = []        # aparatos dibujados en la cocina (para sab
 var salting := false
 var salt_cursor: Control = null
 var salt_sound_t := 0.0
+# Lavado
+var clean_stock := {}                # utensilio -> cuántos limpios quedan
+var dirty: Array = []                # utensilios sucios (por tipo, uno por elemento)
+var sink_item = null                 # lo que está en la pileta {kind, dirt, foam, seed}
+var water_on := false
+var scrubbing := false
+var scrub_cursor: Control = null
+var scrub_last := Vector2.ZERO
+var scrub_sound_t := 0.0
+var sink_view = null
+var rack_view = null
+var rack_recent: Array = []
+var water_player: AudioStreamPlayer = null
+var dishwasher_t := 0.0
 var mesa_pizza = null                # Italia: la pizza que se está armando en la mesa {stretch, sauce, sprinkles, plate_toppings}
 var mesa_view = null
 var pending_order: Dictionary = {}   # pedido que la moza está anotando
@@ -276,6 +293,195 @@ func _stop_cook_audio() -> void:
 	for key in cook_players:
 		cook_players[key].queue_free()
 	cook_players.clear()
+	if water_player != null:
+		water_player.queue_free()
+		water_player = null
+
+
+# =====================================================================
+# Bacha: lavar lo sucio
+# =====================================================================
+
+func _update_washing(delta: float) -> void:
+	# Fregar: la mugre baja según cuánto se mueva la esponja por arriba de la pieza
+	if scrubbing:
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or sink_view == null or not is_instance_valid(sink_view):
+			_end_scrub()
+		else:
+			var mp := get_global_mouse_position()
+			scrub_cursor.position = mp
+			var moved := mp.distance_to(scrub_last)
+			scrub_last = mp
+			if sink_item != null and sink_item["dirt"] > 0.0 and sink_view.is_over_item(sink_view.get_local_mouse_position()):
+				sink_item["dirt"] = maxf(0.0, sink_item["dirt"] - moved / Data.SCRUB_NEEDED)
+				sink_item["foam"] = minf(1.0, sink_item["foam"] + moved / 500.0)
+				scrub_sound_t -= delta
+				if moved > 2.0 and scrub_sound_t <= 0.0:
+					_play_sfx("frotar")
+					scrub_sound_t = 0.28
+	# Enjuagar: con el grifo abierto se va la espuma (si ya no hay mugre)
+	if water_on and sink_item != null and sink_item["foam"] > 0.0:
+		var rate := 0.7 if sink_item["dirt"] <= 0.0 else 0.25
+		sink_item["foam"] = maxf(0.0, sink_item["foam"] - delta * rate)
+	if sink_view != null and is_instance_valid(sink_view):
+		sink_view.item = sink_item
+		sink_view.water = water_on
+	# Sonido de la canilla
+	var want := water_on and sfx_on
+	if want and water_player == null:
+		var st := _looped("res://assets/sfx/canilla.wav")
+		if st != null:
+			water_player = AudioStreamPlayer.new()
+			water_player.stream = st
+			water_player.volume_db = -30.0
+			add_child(water_player)
+			water_player.play()
+	if water_player != null:
+		var target := (-14.0 if current_station == 5 else -24.0) if want else -45.0
+		water_player.volume_db = move_toward(water_player.volume_db, target, 60.0 * delta)
+		if not want and water_player.volume_db <= -44.0:
+			water_player.queue_free()
+			water_player = null
+	# Lavavajillas: lava una cosa sucia cada 8 segundos
+	if _has("lavavajillas") and not dirty.is_empty():
+		dishwasher_t += delta
+		if dishwasher_t >= 8.0:
+			dishwasher_t = 0.0
+			var k: String = dirty.pop_front()
+			clean_stock[k] = clean_stock.get(k, 0) + 1
+			if current_station == 5:
+				_refresh_station()
+	else:
+		dishwasher_t = 0.0
+
+
+func _sink_drop(data: Dictionary) -> void:
+	var k: String = data.get("tool", "")
+	if sink_item != null or not k in dirty:
+		return
+	dirty.erase(k)
+	sink_item = {"kind": k, "dirt": 1.0, "foam": 0.0, "seed": rng.randi() % 1000}
+	_refresh_station()
+
+
+func _toggle_water() -> void:
+	water_on = not water_on
+
+
+func _start_scrub() -> void:
+	if paused:
+		return
+	if sink_item == null:
+		_hint("Primero arrastrá algo sucio a la pileta")
+		return
+	if sink_item["dirt"] <= 0.0:
+		_hint("Ya está fregado: abrí el grifo para enjuagar")
+		return
+	scrubbing = true
+	scrub_last = get_global_mouse_position()
+	var cursor := Painter.new()
+	cursor.animate = true
+	cursor.size = Vector2(1, 1)
+	cursor.z_index = 100
+	cursor.fn = func(ci, time): Art.draw_sponge(ci, Rect2(-34, -26, 68, 52), sin(time * 9.0) * 0.15)
+	add_child(cursor)
+	scrub_cursor = cursor
+	scrub_cursor.position = scrub_last
+
+
+func _end_scrub() -> void:
+	scrubbing = false
+	if scrub_cursor != null and is_instance_valid(scrub_cursor):
+		scrub_cursor.queue_free()
+	scrub_cursor = null
+
+
+func _rack_drop(data: Dictionary) -> void:
+	if sink_item == null or sink_item["dirt"] > 0.0 or sink_item["foam"] > 0.0:
+		return
+	var k: String = data.get("tool", sink_item["kind"])
+	clean_stock[k] = clean_stock.get(k, 0) + 1
+	rack_recent.append(k)
+	if rack_recent.size() > 4:
+		rack_recent.pop_front()
+	sink_item = null
+	_play_sfx("corte1", -10.0)
+	_refresh_all()
+
+
+func _dirty_count() -> int:
+	return dirty.size() + (1 if sink_item != null else 0)
+
+
+func _build_sink_station() -> void:
+	var draw_bg := func(ci, _t):
+		Art.draw_kitchen_wall(ci, Rect2(0, 0, 1280, 300))
+		Art.draw_wood_counter(ci, Rect2(0, 300, 1280, STATION_SIZE.y - 300))
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
+	_tag("Bacha  ·  arrastrá lo sucio a la pileta, frotá con la esponja, enjuagá y ponelo a secar", Vector2(12, 4), 15)
+	# Izquierda: la pila de sucios, agrupada por tipo
+	_tag("Sucio (%d)" % dirty.size(), Vector2(24, 44), 15)
+	var counts := {}
+	for k in dirty:
+		counts[k] = counts.get(k, 0) + 1
+	var n := 0
+	for k in Data.TOOL_ORDER:
+		if not counts.has(k):
+			continue
+		var kind: String = k
+		var b := _prop(Rect2(20 + (n % 2) * 160, 74 + (n / 2) * 128, 150, 120))
+		var seed := n * 37 + 5
+		b.draw_fn = func(ci, r): Art.draw_tool(ci, r.grow(-10), kind, 1.0, 0.0, false, seed)
+		b.text = "%s x%d" % [Data.TOOLS[kind]["name"], counts[kind]]
+		b.text_size = 14
+		b.drag_data = {"kind": "dirty", "tool": kind}
+		b.tooltip_text = "Arrastralo a la pileta"
+		b.pressed.connect(_sink_drop.bind({"tool": kind}))
+		n += 1
+	if n == 0:
+		_tag("¡Nada sucio!\nTodo en orden.", Vector2(60, 140), 18)
+	# Centro: la pileta con su grifo
+	sink_view = SinkView.new()
+	sink_view.position = Vector2(370, 40)
+	sink_view.size = Vector2(440, 380)
+	sink_view.item = sink_item
+	sink_view.water = water_on
+	sink_view.faucet_pressed.connect(_toggle_water)
+	sink_view.dropped.connect(_sink_drop)
+	station_box.add_child(sink_view)
+	var sponge := _prop(Rect2(840, 70, 120, 96))
+	sponge.draw_fn = func(ci, r): Art.draw_sponge(ci, r.grow(-8))
+	sponge.text = "Esponja"
+	sponge.text_size = 14
+	sponge.mouse_default_cursor_shape = Control.CURSOR_DRAG
+	sponge.tooltip_text = "Mantené apretado y frotá en círculos sobre lo sucio"
+	sponge.held.connect(_start_scrub)
+	var faucet := _button("Grifo: cerrar" if water_on else "Grifo: abrir", func():
+		_toggle_water()
+		_refresh_station(), 15)
+	faucet.position = Vector2(840, 190)
+	station_box.add_child(faucet)
+	# Derecha: el escurridor
+	rack_view = RackView.new()
+	rack_view.position = Vector2(990, 44)
+	rack_view.size = Vector2(260, 170)
+	rack_view.recent = rack_recent
+	rack_view.dropped.connect(_rack_drop)
+	station_box.add_child(rack_view)
+	# Stock limpio
+	var lines := []
+	for k in Data.TOOL_ORDER:
+		if k == "pala" and current_country != "italia":
+			continue
+		var c: int = clean_stock.get(k, 0)
+		lines.append("%s: %s" % [Data.TOOLS[k]["name"], str(c) if c > 0 else "¡0!"])
+	var info := "Limpio:\n"
+	for k in lines.size():
+		info += lines[k] + ("\n" if k % 2 == 1 or k == lines.size() - 1 else "   ·   ")
+	if _has("lavavajillas"):
+		info += "Lavavajillas: lava solo\n"
+	info += "\nSin limpios se usa algo sucio:\ncomida -20%, plato -25%."
+	_card(Rect2(990, 250, 270, 0), info, 13)
 
 
 # =====================================================================
@@ -368,6 +574,7 @@ func _process(delta: float) -> void:
 		return
 	_update_sprinkle(delta)
 	_update_salting(delta)
+	_update_washing(delta)
 	elapsed += delta
 
 	if spawned < level["customers"]:
@@ -434,7 +641,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key.keycode == KEY_R and current_station == 1:
 		_toggle_recipes()
 		return
-	if key.keycode >= KEY_1 and key.keycode <= KEY_5:
+	if key.keycode >= KEY_1 and key.keycode <= KEY_6:
 		_go_to_station(key.keycode - KEY_1)
 	elif key.keycode == KEY_SPACE and current_station == 2 and _uses_mesa():
 		_mesa_tap()
@@ -666,10 +873,14 @@ func _show_menu() -> void:
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 	overlay = bg
-	var menu_names := ["Pastas", "Carnes", "Vegetales", "Postres", "¡y más!"]
+	var menu_names := []
+	for lv in _levels():
+		for r in lv["new"]:
+			if menu_names.size() < 7:
+				menu_names.append(Data.RECIPES[r]["name"])
 	var draw_bg := func(ci, t):
-		Art.draw_dining(ci, Rect2(0, 0, 1280, 720), menu_names, t, owned)
-		Art.draw_counter(ci, Rect2(0, 0, 1280, 720), 470)
+		Art.draw_dining(ci, Rect2(0, 0, 1280, 720), menu_names, t, owned, current_country)
+		Art.draw_counter(ci, Rect2(0, 0, 1280, 720), 470, current_country)
 	var p := _painter(Rect2(0, 0, 1280, 720), draw_bg, true, bg)
 	p.mouse_filter = Control.MOUSE_FILTER_STOP
 	var light := func(ci, _t): Art.draw_lighting(ci, Rect2(0, 0, 1280, 720))
@@ -926,7 +1137,8 @@ func _show_intro(i: int) -> void:
 			"3. Tabla: arrastrá la verdura hasta la tabla y cortala (click en la tabla o barra espaciadora).\n" + \
 			"4. Emplatado: arrastrá al plato lo de la bandeja y la salsa. Los toppings se desparraman: mantené el bowl apretado sobre la comida.\n" + \
 			"5. Entrega: tocá la campanita para servir.\n" + \
-			"Click en un ticket para elegir con qué pedido trabajás. Teclas 1 a 5: cambiar de estación.\n\n" + tip
+			"6. Bacha: ollas, espátulas, tablas y platos quedan sucios. Frotalos con la esponja, enjuagá con el grifo y ponelos a secar. Lo que quede sucio al cerrar baja la reputación.\n" + \
+			"Click en un ticket para elegir con qué pedido trabajás. Teclas 1 a 6: cambiar de estación.\n\n" + tip
 	var tl := _label(tip, 14, COL_INK)
 	tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	tl.custom_minimum_size = Vector2(760, 0)
@@ -972,6 +1184,15 @@ func _start_level(i: int) -> void:
 	board = null
 	prepared.clear()
 	mesa_pizza = null
+	# El día arranca con todo limpio
+	clean_stock = {}
+	for tk in Data.TOOLS:
+		clean_stock[tk] = Data.TOOLS[tk]["stock"]
+	dirty = []
+	sink_item = null
+	water_on = false
+	rack_recent = []
+	dishwasher_t = 0.0
 	pending_order = {}
 	selected_id = -1
 	current_station = 0
@@ -1007,7 +1228,7 @@ func _start_day_intro() -> void:
 	p.animate = true
 	p.z_index = 50
 	p.mouse_filter = Control.MOUSE_FILTER_STOP
-	p.fn = func(ci, time): Art.draw_day_intro(ci, Rect2(0, 0, 1280, 720), intro_t / INTRO_LEN, title, sub, time)
+	p.fn = func(ci, time): Art.draw_day_intro(ci, Rect2(0, 0, 1280, 720), intro_t / INTRO_LEN, title, sub, time, current_country)
 	p.gui_input.connect(_on_intro_input)
 	add_child(p)
 	intro_view = p
@@ -1043,6 +1264,12 @@ func _finish_level() -> void:
 	playing = false
 	_play_sfx("puerta")
 	var avg := score_sum / (served + lost) if served + lost > 0 else 0.0   # los que se fueron cuentan como 0
+	# Lo que quedó sucio al cerrar baja la reputación del día
+	var dirty_left := _dirty_count()
+	var dirty_pen := minf(30.0, dirty_left * Data.DIRTY_REPUTATION)
+	avg = maxf(0.0, avg - dirty_pen)
+	_end_scrub()
+	water_on = false
 	var passed := avg >= Data.PASS_SCORE
 	var has_next := level_idx + 1 < _levels().size()
 	if passed and has_next and level_idx + 1 > unlocked_level:
@@ -1062,6 +1289,8 @@ func _finish_level() -> void:
 	box.add_child(stars_pic)
 	box.add_child(_label("Platos servidos: %d" % served + ("   ·   Se fueron sin comer: %d" % lost if lost > 0 else ""), 20, COL_INK))
 	box.add_child(_label("Calificación promedio: %d%%" % int(avg), 20, COL_INK))
+	if dirty_left > 0:
+		box.add_child(_label("Quedaron %d cosas sin lavar: -%d de reputación" % [dirty_left, int(dirty_pen)], 18, Color("a8321e")))
 	box.add_child(_label("Recaudado hoy: $%d   ·   Ahorros: $%d" % [money, savings], 20, COL_INK))
 	var msg := "¡Aprobado! Se desbloqueó el día siguiente." if passed else "Te faltó para el %d%%. ¡Probá de nuevo!" % int(Data.PASS_SCORE)
 	if passed and not has_next:
@@ -1236,8 +1465,22 @@ func _cook(item_id: String) -> void:
 	# El punto que marca la barra sale del ticket elegido (si pide ese ingrediente)
 	var o = _get_order(selected_id)
 	var target: float = _target_for(o, item_id) if o != null else info["target"]
-	slots[idx] = {"item": item_id, "t": 0.0, "target": target, "burn": info["burn"]}
+	slots[idx] = {"item": item_id, "t": 0.0, "target": target, "burn": info["burn"],
+		"dirty_tool": not _take_tool(Data.TOOL_FOR.get(info["where"], ""))}
 	_refresh_all()
+
+
+## Toma un utensilio limpio. Si no queda ninguno, se usa uno sucio (devuelve false y avisa).
+func _take_tool(kind: String) -> bool:
+	if kind == "":
+		return true
+	if clean_stock.get(kind, 0) > 0:
+		clean_stock[kind] -= 1
+		return true
+	dirty.erase(kind)       # se agarra uno de la pila de sucios
+	var name: String = Data.TOOLS[kind]["name"].to_lower()
+	_hint("No queda %s limpio: se usa uno sucio. Lavá en la Bacha (tecla 6)" % name)
+	return false
 
 
 func _on_slot_clicked(idx: int, appliance: String) -> void:
@@ -1250,6 +1493,9 @@ func _take_off(appliance: String, idx: int) -> void:
 		return
 	cookers[appliance][idx] = null
 	var t: float = slot["t"]
+	var tool: String = Data.TOOL_FOR.get(appliance, "")
+	if tool != "":
+		dirty.append(tool)        # el utensilio que se usó queda sucio
 	if slot.has("ta"):
 		# Pizza: se lleva su armado y la cocción de cada mitad
 		var pz: Dictionary = slot["pizza"]
@@ -1259,6 +1505,7 @@ func _take_off(appliance: String, idx: int) -> void:
 			desc = "sin salsa"
 		prepared.append({"item": "pizza", "t": t, "ta": slot["ta"], "tb": slot["tb"], "vtarget": slot["target"],
 			"burn": slot["burn"], "pizza": pz, "rot": slot.get("rot", 0.0), "pantry": false, "chopped": false,
+			"dirty": slot.get("dirty_tool", false),
 			"label": "Pizza quemada" if burnt else "Pizza (%s)" % desc.to_lower()})
 		_refresh_all()
 		return
@@ -1266,7 +1513,8 @@ func _take_off(appliance: String, idx: int) -> void:
 	if t >= slot["burn"]:
 		label = "%s quemado" % Data.ITEMS[slot["item"]]["name"]
 	prepared.append({"item": slot["item"], "t": t, "vtarget": slot["target"], "burn": slot["burn"],
-		"label": label, "pantry": false, "chopped": false, "salt": slot.get("salt", 0.0)})
+		"label": label, "pantry": false, "chopped": false, "salt": slot.get("salt", 0.0),
+		"dirty": slot.get("dirty_tool", false)})
 	_refresh_all()
 
 
@@ -1303,7 +1551,7 @@ func _start_chop(item_id: String) -> void:
 	var cuts: int = Data.ITEMS[item_id]["cuts"]
 	if _has("procesadora"):
 		cuts = int(ceil(cuts / 2.0))
-	board = {"item": item_id, "cuts": 0, "need": cuts}
+	board = {"item": item_id, "cuts": 0, "need": cuts, "dirty_tool": not _take_tool("tabla")}
 	_refresh_all()
 
 
@@ -1315,7 +1563,8 @@ func _chop() -> void:
 	if board["cuts"] >= board["need"]:
 		var item_name: String = Data.ITEMS[board["item"]]["name"]
 		prepared.append({"item": board["item"], "t": -1.0, "label": item_name + " cortada",
-			"pantry": false, "chopped": true})
+			"pantry": false, "chopped": true, "dirty": board.get("dirty_tool", false)})
+		dirty.append("tabla")
 		board = null
 		_refresh_all()
 	elif board_view != null and is_instance_valid(board_view):
@@ -1325,6 +1574,8 @@ func _chop() -> void:
 
 
 func _drop_chop() -> void:
+	if board != null:
+		dirty.append("tabla")
 	board = null
 	_refresh_all()
 
@@ -1720,6 +1971,8 @@ func _deliver() -> void:
 				elif e.get("t", -1.0) >= 0.0:
 					q = _cook_quality(e["t"], _target_for(o, e["item"]), e["burn"])
 					q *= Data.salt_factor(e["item"], e.get("salt", 0.0))   # bien salado (o sin sal si no lleva)
+				if e.get("dirty", false):
+					q *= Data.DIRTY_FOOD     # se cocinó con un utensilio sucio
 				qualities.append(q)
 				leftovers.remove_at(k)
 				break
@@ -1765,6 +2018,10 @@ func _deliver() -> void:
 		# Con bebida: pesa un 10% y el resto se reparte en proporción
 		s_drink = 100.0 if o.get("plate_drink", "") == o["drink"] else 0.0
 		total = total * 0.9 + s_drink * 0.1
+	var dirty_plate := not _take_tool("plato")
+	if dirty_plate:
+		total *= Data.DIRTY_PLATE
+	dirty.append("plato")      # el plato vuelve sucio a la bacha
 	var tip := int(round(total / 10.0))
 	if s_drink >= 100.0:
 		tip += 3
@@ -1787,6 +2044,8 @@ func _deliver() -> void:
 		"lines": ["Ingredientes %d" % int(s_items), "Cocción %d" % int(s_cook), "Salsa %d" % int(s_sauce),
 			"Toppings %d" % int(s_tops), "Espera %d" % int(s_wait)],
 	}
+	if dirty_plate:
+		last_result["lines"].append("¡Plato sucio! -25%")
 
 	served += 1
 	score_sum += total
@@ -1927,6 +2186,8 @@ func _update_tabs() -> void:
 			txt += " ¡se quema!"
 		if i == 2 and board != null:
 			txt += " (cortando)"
+		if i == 5 and _dirty_count() > 0:
+			txt += " (%d)" % _dirty_count()
 		var b: Button = tab_buttons[i]
 		b.text = txt
 		if i == current_station:
@@ -2048,7 +2309,8 @@ func _refresh_station() -> void:
 	customer_views.clear()
 	kitchen_views.clear()
 	mesa_view = null
-	mesa_view = null
+	sink_view = null
+	rack_view = null
 	plating_plate = null
 	take_button = null
 	board_view = null
@@ -2061,6 +2323,7 @@ func _refresh_station() -> void:
 		2: _build_mesa_station() if _uses_mesa() else _build_board_station()
 		3: _build_plating_station()
 		4: _build_delivery_station()
+		5: _build_sink_station()
 	# Luz ambiente por encima de todo (no bloquea el mouse)
 	var light := func(ci, _t): Art.draw_lighting(ci, Rect2(Vector2.ZERO, STATION_SIZE))
 	_painter(Rect2(Vector2.ZERO, STATION_SIZE), light, false)
@@ -2072,7 +2335,7 @@ func _build_orders_station() -> void:
 	var menu := []
 	for r in recipes:
 		menu.append(Data.RECIPES[r]["name"])
-	var draw_bg := func(ci, t): Art.draw_dining(ci, Rect2(Vector2.ZERO, STATION_SIZE), menu, t, owned)
+	var draw_bg := func(ci, t): Art.draw_dining(ci, Rect2(Vector2.ZERO, STATION_SIZE), menu, t, owned, current_country)
 	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, true)
 
 	for wk in walkers:
@@ -2093,7 +2356,7 @@ func _build_orders_station() -> void:
 
 	var has_candy := _has("caramelera")
 	var draw_front := func(ci, _t):
-		Art.draw_counter(ci, Rect2(0, 0, 1280, 236), 88)
+		Art.draw_counter(ci, Rect2(0, 0, 1280, 236), 88, current_country)
 		Art.draw_tex(ci, Art.tex("kitchen/register"), Rect2(900, -6, 130, 100))
 		if has_candy:
 			Art.candy_jar(ci, Rect2(1060, 20, 60, 70))
@@ -2523,6 +2786,7 @@ func _mesa_to_oven() -> void:
 		"pizza": mesa_pizza, "rot": 0.0, "rot_vis": 0.0}
 	mesa_pizza = null
 	_hint("¡Al horno! Girala con la pala a mitad de cocción")
+	slots[idx]["dirty_tool"] = not _take_tool("pala")
 	_refresh_all()
 
 
