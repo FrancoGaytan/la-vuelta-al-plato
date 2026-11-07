@@ -36,7 +36,45 @@ func _initialize() -> void:
 		_save(_chop(v), "res://assets/sfx/corte%d.wav" % (v + 1), 0.6)
 	_save(_shutter(), "res://assets/sfx/persiana.wav", 0.5)
 	_save(_shaker(), "res://assets/sfx/salero.wav", 0.45)
+	rng.seed = 41
+	_save(_squirt(), "res://assets/sfx/detergente.wav", 0.5)
+	_save(_splash(), "res://assets/sfx/chapoteo.wav", 0.5)
+	_save(_clink(3), "res://assets/sfx/platos.wav", 0.55)
+	_save(_clink(1), "res://assets/sfx/plato.wav", 0.5)
 	quit()
+
+
+## Botella de detergente apretada: un "fssst" húmedo con burbujitas
+func _squirt() -> PackedFloat32Array:
+	var buf := _one_shot(0.45)
+	var lp := 0.0
+	var len := int(0.3 * rate)
+	for k in len:
+		lp += 0.12 * (rng.randf_range(-1.0, 1.0) - lp)
+		var x := float(k) / len
+		_put(buf, k, lp * sin(PI * x) * 0.9)
+	_bubbles(buf, 6, 700.0, 1600.0, 0.12)
+	return buf
+
+
+## Algo que se apoya en el agua de la pileta
+func _splash() -> PackedFloat32Array:
+	var buf := _one_shot(0.6)
+	_noise_burst(buf, 0.0, 0.35, 0.7, 0.18)
+	_bubbles(buf, 10, 400.0, 1200.0, 0.15)
+	return buf
+
+
+## Loza chocando: golpecitos de cerámica (count = cuántos platos)
+func _clink(count: int) -> PackedFloat32Array:
+	var buf := _one_shot(0.9)
+	var t := 0.0
+	for k in count:
+		var f := rng.randf_range(1700.0, 2600.0)
+		_noise_burst(buf, t, 0.006, 0.5, 0.8, true)
+		_bell(buf, t, f, 0.32 / (1.0 + k * 0.3), [1.0, 2.31, 4.07, 6.2], [0.09, 0.05, 0.03, 0.02])
+		t += rng.randf_range(0.07, 0.14)
+	return buf
 
 
 ## Agua del grifo cayendo en la pileta (loop)

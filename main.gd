@@ -94,6 +94,10 @@ const ONE_SHOTS := {
 	"salero": ["res://assets/sfx/salero.wav", -20.0],     # sacudir el salero
 	"corte1": ["res://assets/sfx/corte1.wav", -16.0],     # cuchillo en la tabla (sutil)
 	"frotar": ["res://assets/sfx/frotar.wav", -18.0],     # esponja en la bacha
+	"detergente": ["res://assets/sfx/detergente.wav", -16.0], # botella de detergente
+	"chapoteo": ["res://assets/sfx/chapoteo.wav", -16.0],   # algo cae al agua de la pileta
+	"plato": ["res://assets/sfx/plato.wav", -15.0],         # loza que se apoya
+	"platos": ["res://assets/sfx/platos.wav", -14.0],       # se apilan los platos sucios (aviso)
 	"corte2": ["res://assets/sfx/corte2.wav", -16.0],
 	"corte3": ["res://assets/sfx/corte3.wav", -16.0],
 }
@@ -126,6 +130,13 @@ var rack_view = null
 var rack_recent: Array = []
 var water_player: AudioStreamPlayer = null
 var dishwasher_t := 0.0
+var water_flow := 0.0                 # el grifo abre de a poco (0-1)
+var sink_pool := 0.0                  # agua juntada en el fondo de la pileta
+var sponge_soap := 0.0                # detergente en la esponja
+var soap_warned := false
+var scrub_speed := 0.0
+var wash_alert := 0                   # 0 ok, 1 se apilan, 2 urgente
+var wash_alert_t := 0.0
 var mesa_pizza = null                # Italia: la pizza que se está armando en la mesa {stretch, sauce, sprinkles, plate_toppings}
 var mesa_view = null
 var pending_order: Dictionary = {}   # pedido que la moza está anotando
@@ -302,32 +313,51 @@ func _stop_cook_audio() -> void:
 # Bacha: lavar lo sucio
 # =====================================================================
 
+
 func _update_washing(delta: float) -> void:
-	# Fregar: la mugre baja según cuánto se mueva la esponja por arriba de la pieza
+	var sv_ok: bool = sink_view != null and is_instance_valid(sink_view)
+	# El grifo abre y cierra de a poco
+	water_flow = move_toward(water_flow, 1.0 if water_on else 0.0, delta * 3.0)
+	if water_flow > 0.0:
+		sink_pool = minf(0.55, sink_pool + delta * 0.035 * water_flow)
+	else:
+		sink_pool = maxf(0.0, sink_pool - delta * 0.1)
+	# Fregar: las manchas salen sólo donde pasa la esponja
+	var sponge_off = null
 	if scrubbing:
-		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or sink_view == null or not is_instance_valid(sink_view):
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or not sv_ok:
 			_end_scrub()
 		else:
 			var mp := get_global_mouse_position()
 			scrub_cursor.position = mp
 			var moved := mp.distance_to(scrub_last)
 			scrub_last = mp
-			if sink_item != null and sink_item["dirt"] > 0.0 and sink_view.is_over_item(sink_view.get_local_mouse_position()):
-				sink_item["dirt"] = maxf(0.0, sink_item["dirt"] - moved / Data.SCRUB_NEEDED)
-				sink_item["foam"] = minf(1.0, sink_item["foam"] + moved / 500.0)
+			scrub_speed = lerpf(scrub_speed, moved / maxf(delta, 0.001), minf(1.0, delta * 12.0))
+			var local: Vector2 = sink_view.get_local_mouse_position()
+			if sink_item != null and sink_view.is_over_item(local):
+				sponge_off = sink_view.to_item(local)
+				if moved > 0.0:
+					var had_soap := sponge_soap > 0.0
+					sponge_soap = maxf(0.0, sponge_soap - SinkView.scrub(sink_item, sponge_off, moved, sponge_soap, rng))
+					if had_soap and sponge_soap <= 0.0:
+						_hint("Se acabó el detergente de la esponja: tocá la botella")
+					elif not had_soap and sink_item["dirt"] > 0.0 and not soap_warned:
+						soap_warned = true
+						_hint("Sin detergente casi no sale la grasa: tocá la botella")
 				scrub_sound_t -= delta
 				if moved > 2.0 and scrub_sound_t <= 0.0:
-					_play_sfx("frotar")
-					scrub_sound_t = 0.28
-	# Enjuagar: con el grifo abierto se va la espuma (si ya no hay mugre)
-	if water_on and sink_item != null and sink_item["foam"] > 0.0:
-		var rate := 0.7 if sink_item["dirt"] <= 0.0 else 0.25
-		sink_item["foam"] = maxf(0.0, sink_item["foam"] - delta * rate)
-	if sink_view != null and is_instance_valid(sink_view):
+					_play_sfx("frotar", -3.0 if water_flow > 0.5 else 0.0)
+					scrub_sound_t = 0.26
+	# Enjuagar: el chorro se lleva la espuma
+	if sink_item != null:
+		SinkView.rinse(sink_item, delta, water_flow, sponge_off)
+	if sv_ok:
 		sink_view.item = sink_item
-		sink_view.water = water_on
-	# Sonido de la canilla
-	var want := water_on and sfx_on
+		sink_view.flow = water_flow
+		sink_view.pool = sink_pool
+		sink_view.soap = sponge_soap
+	# Sonido de la canilla (más fuerte y agudo si el chorro pega sobre algo)
+	var want := water_flow > 0.05 and sfx_on
 	if want and water_player == null:
 		var st := _looped("res://assets/sfx/canilla.wav")
 		if st != null:
@@ -337,8 +367,11 @@ func _update_washing(delta: float) -> void:
 			add_child(water_player)
 			water_player.play()
 	if water_player != null:
-		var target := (-14.0 if current_station == 5 else -24.0) if want else -45.0
+		var target := -45.0
+		if want:
+			target = (-14.0 if current_station == 5 else -24.0) + (2.0 if sink_item != null else 0.0) + linear_to_db(water_flow)
 		water_player.volume_db = move_toward(water_player.volume_db, target, 60.0 * delta)
+		water_player.pitch_scale = move_toward(water_player.pitch_scale, 1.12 if sink_item != null else 1.0, delta)
 		if not want and water_player.volume_db <= -44.0:
 			water_player.queue_free()
 			water_player = null
@@ -353,6 +386,37 @@ func _update_washing(delta: float) -> void:
 				_refresh_station()
 	else:
 		dishwasher_t = 0.0
+	_check_wash_alert(delta)
+
+
+## 0 = todo bien, 1 = se están apilando, 2 = urgente (sin platos limpios o una montaña de sucios)
+func _wash_alert_level() -> int:
+	var plates: int = clean_stock.get("plato", 0)
+	if plates == 0 or dirty.size() >= 10:
+		return 2
+	if plates <= 2 or dirty.size() >= 6:
+		return 1
+	return 0
+
+
+## Avisa cuando se acumula lo sucio: ruido de loza apilándose y un cartel (y recuerda cada tanto si es urgente)
+func _check_wash_alert(delta: float) -> void:
+	var lvl := _wash_alert_level()
+	wash_alert_t -= delta
+	var remind: bool = lvl == 2 and wash_alert_t <= 0.0 and current_station != 5
+	if lvl > wash_alert or remind:
+		wash_alert_t = 30.0
+		_play_sfx("platos", 0.0 if lvl == 2 else -3.0)
+		var plates: int = clean_stock.get("plato", 0)
+		if plates == 0:
+			_hint("¡No quedan platos limpios! Los próximos salen en plato sucio: andá a la Bacha (tecla 6)")
+		elif lvl == 2:
+			_hint("¡Montaña de cosas sucias en la Bacha! Lavá antes de que no quede nada (tecla 6)")
+		elif plates <= 2:
+			_hint("Quedan %d platos limpios: se están apilando los sucios en la Bacha (tecla 6)" % plates)
+		else:
+			_hint("Se están apilando las cosas sucias en la Bacha (tecla 6)")
+	wash_alert = lvl
 
 
 func _sink_drop(data: Dictionary) -> void:
@@ -360,12 +424,24 @@ func _sink_drop(data: Dictionary) -> void:
 	if sink_item != null or not k in dirty:
 		return
 	dirty.erase(k)
-	sink_item = {"kind": k, "dirt": 1.0, "foam": 0.0, "seed": rng.randi() % 1000}
+	sink_item = SinkView.new_item(k, rng.randi() % 100000)
+	_play_sfx("chapoteo" if sink_pool > 0.08 else "plato", -6.0)
 	_refresh_station()
 
 
 func _toggle_water() -> void:
 	water_on = not water_on
+	if current_station == 5:
+		_refresh_station()
+
+
+func _load_soap() -> void:
+	sponge_soap = 1.0
+	soap_warned = false
+	_play_sfx("detergente")
+	_hint("Esponja con detergente: ¡a fregar!")
+	if current_station == 5:
+		_refresh_station()
 
 
 func _start_scrub() -> void:
@@ -374,16 +450,19 @@ func _start_scrub() -> void:
 	if sink_item == null:
 		_hint("Primero arrastrá algo sucio a la pileta")
 		return
-	if sink_item["dirt"] <= 0.0:
-		_hint("Ya está fregado: abrí el grifo para enjuagar")
+	if sink_item["dirt"] <= 0.0 and sink_item["bubbles"].is_empty():
+		_hint("Ya está limpio: arrastralo al escurridor")
 		return
 	scrubbing = true
+	scrub_speed = 0.0
 	scrub_last = get_global_mouse_position()
 	var cursor := Painter.new()
 	cursor.animate = true
 	cursor.size = Vector2(1, 1)
 	cursor.z_index = 100
-	cursor.fn = func(ci, time): Art.draw_sponge(ci, Rect2(-34, -26, 68, 52), sin(time * 9.0) * 0.15)
+	cursor.fn = func(ci, time):
+		var sq := clampf(scrub_speed / 900.0, 0.0, 1.0)
+		Art.draw_sponge(ci, Rect2(-36, -26, 72, 52), sin(time * 14.0) * 0.12 * sq, sponge_soap, sq)
 	add_child(cursor)
 	scrub_cursor = cursor
 	scrub_cursor.position = scrub_last
@@ -394,18 +473,21 @@ func _end_scrub() -> void:
 	if scrub_cursor != null and is_instance_valid(scrub_cursor):
 		scrub_cursor.queue_free()
 	scrub_cursor = null
+	if current_station == 5:
+		_refresh_station()     # para que la esponja muestre cuánto detergente le queda
 
 
 func _rack_drop(data: Dictionary) -> void:
-	if sink_item == null or sink_item["dirt"] > 0.0 or sink_item["foam"] > 0.0:
+	if sink_item == null or sink_item["dirt"] > 0.0 or not sink_item["bubbles"].is_empty():
 		return
 	var k: String = data.get("tool", sink_item["kind"])
 	clean_stock[k] = clean_stock.get(k, 0) + 1
-	rack_recent.append(k)
-	if rack_recent.size() > 4:
-		rack_recent.pop_front()
+	rack_recent.append({"kind": k, "t": Time.get_ticks_msec() / 1000.0})
+	var plates := rack_recent.filter(func(r): return r["kind"] == "plato")
+	var others := rack_recent.filter(func(r): return r["kind"] != "plato")
+	rack_recent = plates.slice(-6) + others.slice(-3)
 	sink_item = null
-	_play_sfx("corte1", -10.0)
+	_play_sfx("plato", -4.0)
 	_refresh_all()
 
 
@@ -418,8 +500,8 @@ func _build_sink_station() -> void:
 		Art.draw_kitchen_wall(ci, Rect2(0, 0, 1280, 300))
 		Art.draw_wood_counter(ci, Rect2(0, 300, 1280, STATION_SIZE.y - 300))
 	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
-	_tag("Bacha  ·  arrastrá lo sucio a la pileta, frotá con la esponja, enjuagá y ponelo a secar", Vector2(12, 4), 15)
-	# Izquierda: la pila de sucios, agrupada por tipo
+	_tag("Bacha  ·  sucio a la pileta → detergente → frotá las manchas → enjuagá bajo el chorro → al escurridor", Vector2(12, 4), 15)
+	# Izquierda: la pila de sucios, agrupada por tipo (los platos, apilados)
 	_tag("Sucio (%d)" % dirty.size(), Vector2(24, 44), 15)
 	var counts := {}
 	for k in dirty:
@@ -429,10 +511,15 @@ func _build_sink_station() -> void:
 		if not counts.has(k):
 			continue
 		var kind: String = k
+		var cnt: int = counts[kind]
 		var b := _prop(Rect2(20 + (n % 2) * 160, 74 + (n / 2) * 128, 150, 120))
 		var seed := n * 37 + 5
-		b.draw_fn = func(ci, r): Art.draw_tool(ci, r.grow(-10), kind, 1.0, 0.0, false, seed)
-		b.text = "%s x%d" % [Data.TOOLS[kind]["name"], counts[kind]]
+		b.draw_fn = func(ci, r):
+			# Se ve la pila: varias piezas una encima de otra
+			for j in mini(cnt, 4):
+				var off := Vector2(4.0 * ((j % 2) * 2 - 1) * (1 if j > 0 else 0), -7.0 * j)
+				Art.draw_tool(ci, Rect2(r.position + Vector2(10, 14) + off, r.size - Vector2(20, 24)), kind, 1.0, 0.0, false, seed + j)
+		b.text = "%s x%d" % [Data.TOOLS[kind]["name"], cnt]
 		b.text_size = 14
 		b.drag_data = {"kind": "dirty", "tool": kind}
 		b.tooltip_text = "Arrastralo a la pileta"
@@ -445,21 +532,29 @@ func _build_sink_station() -> void:
 	sink_view.position = Vector2(370, 40)
 	sink_view.size = Vector2(440, 380)
 	sink_view.item = sink_item
-	sink_view.water = water_on
+	sink_view.flow = water_flow
+	sink_view.pool = sink_pool
+	sink_view.soap = sponge_soap
 	sink_view.faucet_pressed.connect(_toggle_water)
 	sink_view.dropped.connect(_sink_drop)
 	station_box.add_child(sink_view)
-	var sponge := _prop(Rect2(840, 70, 120, 96))
-	sponge.draw_fn = func(ci, r): Art.draw_sponge(ci, r.grow(-8))
-	sponge.text = "Esponja"
-	sponge.text_size = 14
+	# Esponja y detergente
+	var soap_now := sponge_soap
+	var sponge := _prop(Rect2(830, 56, 130, 100))
+	sponge.draw_fn = func(ci, r): Art.draw_sponge(ci, r.grow(-8), 0.0, soap_now)
+	sponge.text = "Esponja" if sponge_soap > 0.0 else "Esponja (seca)"
+	sponge.text_size = 12
 	sponge.mouse_default_cursor_shape = Control.CURSOR_DRAG
-	sponge.tooltip_text = "Mantené apretado y frotá en círculos sobre lo sucio"
+	sponge.tooltip_text = "Mantené apretado y frotá sobre las manchas"
 	sponge.held.connect(_start_scrub)
-	var faucet := _button("Grifo: cerrar" if water_on else "Grifo: abrir", func():
-		_toggle_water()
-		_refresh_station(), 15)
-	faucet.position = Vector2(840, 190)
+	var soap := _prop(Rect2(845, 172, 100, 130))
+	soap.draw_fn = func(ci, r): Art.draw_detergent(ci, r.grow(-6), 0.7)
+	soap.text = "Detergente"
+	soap.text_size = 12
+	soap.tooltip_text = "Tocalo para cargar la esponja"
+	soap.pressed.connect(_load_soap)
+	var faucet := _button("Cerrar grifo" if water_on else "Abrir grifo", _toggle_water, 14)
+	faucet.position = Vector2(836, 330)
 	station_box.add_child(faucet)
 	# Derecha: el escurridor
 	rack_view = RackView.new()
@@ -482,6 +577,7 @@ func _build_sink_station() -> void:
 		info += "Lavavajillas: lava solo\n"
 	info += "\nSin limpios se usa algo sucio:\ncomida -20%, plato -25%."
 	_card(Rect2(990, 250, 270, 0), info, 13)
+
 
 
 # =====================================================================
@@ -1193,6 +1289,12 @@ func _start_level(i: int) -> void:
 	water_on = false
 	rack_recent = []
 	dishwasher_t = 0.0
+	water_flow = 0.0
+	sink_pool = 0.0
+	sponge_soap = 0.0
+	soap_warned = false
+	wash_alert = 0
+	wash_alert_t = 0.0
 	pending_order = {}
 	selected_id = -1
 	current_station = 0
@@ -1806,9 +1908,10 @@ func _draw_sprinkle_cursor(ci: CanvasItem, time: float) -> void:
 	if over:
 		var info: Dictionary = Art.TOPPINGS.get(sprinkle_name, {"color": Color.WHITE, "shape": "dot"})
 		if info["shape"] == "drizzle":
-			# Hilo continuo que cae del bowl
-			var wob := sin(time * 6.0) * 1.5
-			ci.draw_line(Vector2(-2, -8), Vector2(wob, 12), Color(info["color"], 0.9), 2.0)
+			# Gotitas que caen de la cuchara, de a una
+			for k in 2:
+				var ph := fmod(time * 1.6 + k * 0.5, 1.0)
+				ci.draw_circle(Vector2(-2 + k * 1.5, -8 + ph * 20), 1.6 * (1.0 - ph * 0.4), Color(info["color"], 1.0 - ph * 0.6))
 		else:
 			for k in 4:
 				var ph := fmod(time * 2.2 + k / 4.0, 1.0)
@@ -2186,8 +2289,9 @@ func _update_tabs() -> void:
 			txt += " ¡se quema!"
 		if i == 2 and board != null:
 			txt += " (cortando)"
+		var piling: bool = i == 5 and wash_alert >= 1
 		if i == 5 and _dirty_count() > 0:
-			txt += " (%d)" % _dirty_count()
+			txt += (" ¡%d sucios!" if piling else " (%d)") % _dirty_count()
 		var b: Button = tab_buttons[i]
 		b.text = txt
 		if i == current_station:
@@ -2196,7 +2300,11 @@ func _update_tabs() -> void:
 		else:
 			b.remove_theme_stylebox_override("normal")
 			b.remove_theme_stylebox_override("hover")
-		if i == 1 and smoking:
+		if piling and i != current_station:
+			# Se apilan los sucios: la pestaña se pone colorada (y titila si es urgente)
+			var hot: bool = wash_alert == 1 or fmod(elapsed, 1.0) < 0.5
+			b.add_theme_stylebox_override("normal", _sb(Color("f6b3a2") if hot else Color("f6e7c8"), Color("c0281a"), 10, 3))
+		if (i == 1 and smoking) or piling:
 			b.add_theme_color_override("font_color", Color("c0281a"))
 		else:
 			b.remove_theme_color_override("font_color")
@@ -2904,6 +3012,11 @@ func _build_plating_station() -> void:
 			b.drag_data = {"kind": "pantry", "item": pantry[k]}
 			b.pressed.connect(_plate_pantry.bind(pantry[k]))
 
+	# La pila de platos limpios (se va achicando: hay que lavar)
+	var n_clean: int = clean_stock.get("plato", 0)
+	var stack := _painter(Rect2(712, 360, 92, 104), func(ci, _t): Art.draw_plate_stack(ci, Rect2(0, 0, 92, 104), n_clean), false)
+	stack.tooltip_text = "Platos limpios que quedan. Los sucios se lavan en la Bacha (tecla 6)."
+	stack.mouse_filter = Control.MOUSE_FILTER_PASS
 	# Centro: el plato (recibe lo que se arrastra)
 	var drinks: bool = o.get("drink", "") != ""
 	var plate := PlateView.new()

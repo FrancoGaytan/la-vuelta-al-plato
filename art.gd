@@ -323,7 +323,7 @@ static func sprinkle_rate(name: String) -> Array:
 		"dollop":
 			return [0.5, 3]
 		"drizzle":
-			return [0.02, 200]
+			return [0.13, 20]     # gotitas sueltas, no un chorro
 	return [0.04, 70]
 
 
@@ -336,19 +336,30 @@ static func draw_sprinkles(ci: CanvasItem, center: Vector2, radius: float, sprin
 		var pts: Array = sprinkles[name]["pts"]
 		var k := radius / 95.0      # piezas chicas: un desparramado delicado
 		if info["shape"] == "drizzle":
-			var line := PackedVector2Array()
-			for j in pts.size():
-				var p: Vector2 = center + pts[j] * radius
-				if not line.is_empty() and p.distance_to(line[-1]) > radius * 0.5:
-					_drizzle_line(ci, line, info["color"], k)
-					line = PackedVector2Array()
-				line.append(p)
-			_drizzle_line(ci, line, info["color"], k)
+			_drizzle_drops(ci, center, radius, pts, info["color"], k, idx)
 			continue
 		for j in pts.size():
 			var rng := RandomNumberGenerator.new()
 			rng.seed = idx * 1009 + j * 31
 			draw_topping_piece(ci, center + pts[j] * radius, k, info["color"], info["shape"], rng)
+
+
+## Dulce de leche delicado: gotitas brillantes de distinto tamaño y, entre algunas cercanas, un hilito finísimo.
+static func _drizzle_drops(ci: CanvasItem, center: Vector2, radius: float, pts: Array, col: Color, k: float, idx: int) -> void:
+	var rng := RandomNumberGenerator.new()
+	for j in pts.size():
+		var p: Vector2 = center + pts[j] * radius
+		if j > 0:
+			var q: Vector2 = center + pts[j - 1] * radius
+			if p.distance_to(q) < radius * 0.22 and j % 3 != 0:
+				ci.draw_line(q, p, Color(col, 0.45), maxf(0.7, 0.7 * k), true)
+	for j in pts.size():
+		rng.seed = idx * 977 + j * 53
+		var p: Vector2 = center + pts[j] * radius
+		var r := rng.randf_range(1.4, 2.6) * k
+		ellipse(ci, p + Vector2(0.4, 0.6) * k, Vector2(r * 1.1, r * 0.9), col.darkened(0.25))
+		ellipse(ci, p, Vector2(r * 1.05, r * 0.85), col)
+		ci.draw_circle(p + Vector2(-r * 0.35, -r * 0.3), r * 0.32, Color(1, 0.93, 0.78, 0.75))
 
 
 ## Hilo fino de dulce de leche: se afina en las puntas y tiene un brillo encima.
@@ -1102,46 +1113,189 @@ static func draw_tool(ci: CanvasItem, rect: Rect2, kind: String, dirt := 0.0, fo
 			ci.draw_line(p - Vector2(0, r), p + Vector2(0, r), Color(1, 1, 1, 0.9), 2)
 
 
-static func draw_sponge(ci: CanvasItem, rect: Rect2, tilt := 0.0) -> void:
+## Esponja. soap (0-1) = cuánto detergente tiene (se ve la espuma encima); squash = aplastada al frotar.
+static func draw_sponge(ci: CanvasItem, rect: Rect2, tilt := 0.0, soap := 0.0, squash := 0.0) -> void:
 	var c := rect.get_center()
 	var s := minf(rect.size.x, rect.size.y * 2.2)
-	ci.draw_set_transform(c, tilt, Vector2.ONE)
+	ci.draw_set_transform(c, tilt, Vector2(1.0 + squash * 0.08, 1.0 - squash * 0.18))
 	rrect(ci, Rect2(Vector2(-s * 0.36, -s * 0.18), Vector2(s * 0.72, s * 0.24)), Color("f2d24a"), 6, Color("c9a81e"), 2)
 	rrect(ci, Rect2(Vector2(-s * 0.36, s * 0.04), Vector2(s * 0.72, s * 0.14)), Color("3f9a48"), 4)
 	for k in 6:
 		ci.draw_circle(Vector2(-s * 0.26 + k * s * 0.1, -s * 0.06 + (k % 2) * 4), 2, Color("d9b632"))
+	if soap > 0.02:
+		for k in int(3 + soap * 7):
+			var p := Vector2(-s * 0.3 + fmod(k * 0.37, 1.0) * s * 0.6, -s * 0.2 - fmod(k * 0.53, 1.0) * s * 0.08)
+			var r := s * (0.03 + 0.03 * fmod(k * 0.71, 1.0))
+			ci.draw_circle(p, r, Color(1, 1, 1, 0.9))
+			ci.draw_arc(p, r, 0, TAU, 10, Color(0.7, 0.82, 0.95, 0.8), 1.0)
 	ci.draw_set_transform(Vector2.ZERO, 0, Vector2.ONE)
 
 
+## Botella de detergente (verde, con tapita)
+static func draw_detergent(ci: CanvasItem, rect: Rect2, level := 1.0) -> void:
+	var c := rect.get_center()
+	var h := rect.size.y * 0.86
+	var w := minf(rect.size.x * 0.5, h * 0.42)
+	var body := Rect2(c.x - w / 2.0, c.y - h * 0.32, w, h * 0.78)
+	ellipse(ci, Vector2(c.x + 3, body.end.y + 2), Vector2(w * 0.6, 5), Color(0, 0, 0, 0.2))
+	rrect(ci, body, Color("3fae5a"), 10, Color("2a7d3e"), 2)
+	# Líquido que se ve a través del plástico
+	var lv := Rect2(body.position.x + 4, body.end.y - 4 - (body.size.y - 8) * level, body.size.x - 8, (body.size.y - 8) * level)
+	rrect(ci, lv, Color(0.55, 0.9, 0.45, 0.5), 7)
+	rrect(ci, Rect2(body.position.x + 6, body.position.y + h * 0.18, body.size.x - 12, h * 0.22), Color("f6f1e0"), 4)
+	text(ci, Vector2(body.position.x, body.position.y + h * 0.33), "LIMÓN", int(maxf(8.0, w * 0.2)), Color("2a7d3e"), HORIZONTAL_ALIGNMENT_CENTER, body.size.x)
+	rrect(ci, Rect2(c.x - w * 0.22, body.position.y - h * 0.1, w * 0.44, h * 0.11), Color("2a7d3e"), 3)
+	rrect(ci, Rect2(c.x - w * 0.09, body.position.y - h * 0.2, w * 0.18, h * 0.11), Color("e8e2d0"), 2)
+	ci.draw_line(Vector2(body.position.x + 6, body.position.y + 8), Vector2(body.position.x + 6, body.end.y - 10), Color(1, 1, 1, 0.35), 3)
+
+
+## Genera manchas de mugre sobre un utensilio. Cada una: o (centro en unidades de s), r, hp (1 = sucia), col, sub.
+static func make_dirt(kind: String, rng: RandomNumberGenerator) -> Array:
+	var out := []
+	var n := rng.randi_range(6, 9)
+	for k in n:
+		var o := Vector2.ZERO
+		match kind:
+			"espatula":
+				o = Vector2(rng.randf_range(-0.13, 0.13), rng.randf_range(-0.36, -0.08)).rotated(-0.6)
+			"pala":
+				o = (Vector2(0, -0.18) + Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf()) * 0.2).rotated(-0.7)
+			"tabla":
+				o = Vector2(rng.randf_range(-0.34, 0.34), rng.randf_range(-0.2, 0.2))
+			"bandeja":
+				o = Vector2(rng.randf_range(-0.32, 0.32), rng.randf_range(-0.18, 0.18))
+			"canasto":
+				o = Vector2(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.22, 0.22))
+			_:
+				o = Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf()) * 0.3
+		var cols := [Color(0.45, 0.28, 0.12), Color(0.72, 0.26, 0.12), Color(0.6, 0.5, 0.2), Color(0.35, 0.25, 0.15)]
+		var sub := []
+		for j in 3:
+			sub.append([Vector2.from_angle(rng.randf() * TAU) * rng.randf() * 0.6, rng.randf_range(0.5, 1.0), rng.randf() * PI])
+		out.append({"o": o, "r": rng.randf_range(0.06, 0.1), "hp": 1.0, "col": cols[rng.randi() % cols.size()], "sub": sub})
+	return out
+
+
+## Dibuja las manchas: a medida que se friegan se achican y se aclaran.
+static func draw_dirt_spots(ci: CanvasItem, rect: Rect2, spots: Array) -> void:
+	var c := rect.get_center()
+	var s := minf(rect.size.x, rect.size.y)
+	for sp in spots:
+		var hp: float = sp["hp"]
+		if hp <= 0.0:
+			continue
+		var center: Vector2 = c + sp["o"] * s
+		var r: float = sp["r"] * s * (0.45 + 0.55 * hp)
+		var col: Color = sp["col"]
+		# Aureola de grasa
+		ellipse(ci, center, Vector2(r * 1.5, r * 1.15), Color(0.8, 0.65, 0.3, 0.12 * hp))
+		for sb in sp["sub"]:
+			var p: Vector2 = center + sb[0] * r
+			ci.draw_set_transform(p, sb[2], Vector2.ONE)
+			ellipse(ci, Vector2.ZERO, Vector2(r * sb[1], r * sb[1] * 0.62), Color(col, 0.25 + 0.6 * hp))
+			ci.draw_set_transform(Vector2.ZERO, 0, Vector2.ONE)
+		if hp > 0.5:
+			ci.draw_circle(center + Vector2(-r * 0.3, -r * 0.3), r * 0.18, Color(1, 1, 1, 0.25))
+
+
+## Burbujas de detergente. Cada una: o (unidades de s), r (px), life (0-1).
+static func draw_bubbles(ci: CanvasItem, rect: Rect2, bubbles: Array) -> void:
+	var c := rect.get_center()
+	var s := minf(rect.size.x, rect.size.y)
+	for b in bubbles:
+		var p: Vector2 = c + b["o"] * s
+		var a := clampf(b["life"] * 2.0, 0.0, 1.0)
+		var r: float = b["r"] * (0.6 + 0.4 * a)
+		ci.draw_circle(p, r, Color(1, 1, 1, 0.75 * a))
+		ci.draw_arc(p, r, 0, TAU, 12, Color(0.66, 0.8, 0.95, 0.9 * a), 1.0)
+		ci.draw_circle(p + Vector2(-r * 0.35, -r * 0.35), r * 0.22, Color(1, 1, 1, a))
+
+
+## Pila de platos limpios con el número (en rojo cuando quedan pocos)
+static func draw_plate_stack(ci: CanvasItem, rect: Rect2, n: int) -> void:
+	var cx := rect.get_center().x
+	var base := rect.end.y - 30
+	ellipse(ci, Vector2(cx + 3, base + 6), Vector2(rect.size.x * 0.44, 7), Color(0, 0, 0, 0.18))
+	for k in mini(n, 8):
+		var y := base - k * 6.0
+		ellipse(ci, Vector2(cx, y + 2), Vector2(rect.size.x * 0.42, 8), Color("b9c0c5"))
+		ellipse(ci, Vector2(cx, y), Vector2(rect.size.x * 0.42, 8), Color("f7f7f4"))
+		ellipse(ci, Vector2(cx, y), Vector2(rect.size.x * 0.26, 4.5), Color("e6e8e6"))
+	if n == 0:
+		ci.draw_arc(Vector2(cx, base - 4), 14, 0, TAU, 20, Color("c0281a"), 3)
+		ci.draw_line(Vector2(cx - 10, base + 6), Vector2(cx + 10, base - 14), Color("c0281a"), 3)
+	var col := Color("c0281a") if n <= 2 else Color("3b2a1e")
+	text(ci, Vector2(rect.position.x - 20, rect.end.y - 4), "Platos limpios: %d" % n, 13, col, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x + 40, 4, Color(1, 1, 1, 0.85))
+
+
+## Plato parado de canto en el escurridor
+static func draw_plate_edge(ci: CanvasItem, rect: Rect2) -> void:
+	var c := rect.get_center()
+	ellipse(ci, c, Vector2(rect.size.x * 0.16, rect.size.y * 0.48), Color("d9dde0"))
+	ellipse(ci, c + Vector2(rect.size.x * 0.03, 0), Vector2(rect.size.x * 0.1, rect.size.y * 0.4), Color("f7f7f4"))
+	ci.draw_line(c + Vector2(-rect.size.x * 0.05, -rect.size.y * 0.3), c + Vector2(-rect.size.x * 0.05, rect.size.y * 0.1), Color(1, 1, 1, 0.9), 2)
+
+
 ## Pileta con grifo. water = si sale agua.
-static func draw_sink(ci: CanvasItem, rect: Rect2, water: bool, time: float) -> void:
+## Dónde cae el chorro del grifo (x en coordenadas de rect) y desde qué altura sale.
+static func sink_stream(rect: Rect2) -> Vector2:
+	var basin_y := rect.position.y + rect.size.y * 0.25
+	return Vector2(rect.get_center().x + 52, basin_y + 6 - rect.size.y * 0.2 + 22)
+
+
+## Pileta de acero con grifo monocomando.
+## flow (0-1) = cuánta agua sale; pool (0-1) = agua acumulada en el fondo; soapy = el agua tiene espuma.
+## hit_y = a qué altura choca el chorro (algo apoyado en la pileta); -1 = el fondo.
+static func draw_sink(ci: CanvasItem, rect: Rect2, flow: float, time: float, pool := 0.0, soapy := false) -> void:
 	var basin := Rect2(rect.position + Vector2(0, rect.size.y * 0.25), Vector2(rect.size.x, rect.size.y * 0.75))
 	rrect(ci, Rect2(basin.position + Vector2(4, 8), basin.size), Color(0, 0, 0, 0.3), 18)
 	rrect(ci, basin, Color("c5ccd2"), 18, Color("8d98a3"), 4)
 	rrect(ci, basin.grow(-16), Color("8d98a3"), 14)
-	grad_rect(ci, basin.grow(-22), Color("aab3ba"), Color("7d8790"))
-	ci.draw_circle(basin.get_center() + Vector2(0, basin.size.y * 0.28), 10, Color("4a5056"))
-	ci.draw_circle(basin.get_center() + Vector2(0, basin.size.y * 0.28), 6, Color("2b2d31"))
-	# Grifo
+	var inner := basin.grow(-22)
+	grad_rect(ci, inner, Color("aab3ba"), Color("7d8790"))
+	# Acero cepillado: vetas finas y un reflejo
+	for k in 18:
+		var y := inner.position.y + 6 + k * (inner.size.y - 12) / 17.0
+		ci.draw_line(Vector2(inner.position.x + 8, y), Vector2(inner.end.x - 8, y), Color(1, 1, 1, 0.04), 1)
+	ci.draw_line(inner.position + Vector2(14, 10), Vector2(inner.position.x + 14, inner.end.y - 12), Color(1, 1, 1, 0.18), 4)
+	var drain := basin.get_center() + Vector2(0, basin.size.y * 0.28)
+	ci.draw_circle(drain, 11, Color("5b6168"))
+	ci.draw_circle(drain, 8, Color("2b2d31"))
+	for k in 4:
+		ci.draw_line(drain + Vector2.from_angle(k * PI / 4) * 7, drain - Vector2.from_angle(k * PI / 4) * 7, Color("7d8790"), 1.5)
+	# Agua acumulada en el fondo (se va por la rejilla cuando se cierra el grifo)
+	if pool > 0.01:
+		var h := inner.size.y * 0.42 * pool
+		var wr := Rect2(inner.position.x, inner.end.y - h, inner.size.x, h)
+		rrect(ci, wr, Color(0.62, 0.78, 0.9, 0.35), 10)
+		var surf := PackedVector2Array()
+		for k in 25:
+			var x := wr.position.x + 6 + k * (wr.size.x - 12) / 24.0
+			surf.append(Vector2(x, wr.position.y + sin(time * 3.0 + k * 0.7) * 1.5))
+		ci.draw_polyline(surf, Color(1, 1, 1, 0.45), 2.0, true)
+		if soapy:
+			for k in 16:
+				var x := wr.position.x + 14 + fmod(k * 0.618, 1.0) * (wr.size.x - 28)
+				ci.draw_circle(Vector2(x, wr.position.y + sin(time * 2.0 + k) * 1.5), 3 + (k % 3) * 2, Color(1, 1, 1, 0.7))
+	# Grifo cuello de cisne
 	var base := Vector2(rect.get_center().x, basin.position.y + 6)
 	rrect(ci, Rect2(base + Vector2(-18, -10), Vector2(36, 16)), Color("aab3ba"), 6, Color("7d8790"), 2)
 	ci.draw_line(base + Vector2(0, -6), base + Vector2(0, -rect.size.y * 0.2), Color("c5ccd2"), 12)
 	ci.draw_arc(base + Vector2(26, -rect.size.y * 0.2), 26, PI, PI * 2.0, 16, Color("c5ccd2"), 12)
 	ci.draw_line(base + Vector2(52, -rect.size.y * 0.2), base + Vector2(52, -rect.size.y * 0.2 + 18), Color("c5ccd2"), 12)
 	ci.draw_arc(base + Vector2(26, -rect.size.y * 0.2), 26, PI * 1.1, PI * 1.5, 8, Color(1, 1, 1, 0.6), 3)
-	# Manija (roja = cerrada, azul = abierta)
-	var handle := base + Vector2(-40, -18)
-	ci.draw_circle(handle, 13, Color("3a7fd0") if water else Color("c8463c"))
-	ci.draw_line(handle + Vector2(-9, 0), handle + Vector2(9, 0), Color(1, 1, 1, 0.8), 3)
-	if water:
-		var mouth := base + Vector2(52, -rect.size.y * 0.2 + 22)
-		var bottom := basin.get_center().y + 10
-		for k in 4:
-			var x := mouth.x - 4 + k * 2.6 + sin(time * 30.0 + k) * 0.8
-			ci.draw_line(Vector2(x, mouth.y), Vector2(x, bottom), Color(0.7, 0.88, 1.0, 0.55), 2.0)
-		for k in 6:
-			var ph := fmod(time * 2.0 + k / 6.0, 1.0)
-			ci.draw_arc(Vector2(mouth.x, bottom), 6 + ph * 30, PI * 1.1, PI * 1.9, 10, Color(1, 1, 1, 0.5 * (1.0 - ph)), 1.5)
+	ci.draw_line(base + Vector2(-3, -10), base + Vector2(-3, -rect.size.y * 0.2 + 4), Color(1, 1, 1, 0.5), 2)
+	# Monocomando: palanca que se levanta para abrir
+	var piv := base + Vector2(-40, -14)
+	rrect(ci, Rect2(piv + Vector2(-13, -2), Vector2(26, 16)), Color("aab3ba"), 5, Color("7d8790"), 2)
+	ci.draw_circle(piv, 9, Color("c5ccd2"))
+	var ang := lerpf(-0.15, -1.05, flow)
+	var tip := piv + Vector2.from_angle(PI + ang) * 30
+	ci.draw_line(piv, tip, Color("8d98a3"), 9)
+	ci.draw_line(piv, tip, Color("dfe4e8"), 5)
+	ci.draw_circle(tip, 5, Color("dfe4e8"))
+	ci.draw_circle(piv + Vector2(-7, 9), 2.5, Color("c8463c"))
+	ci.draw_circle(piv + Vector2(7, 9), 2.5, Color("3a7fd0"))
 
 
 ## Escurridor de platos (alambre)
