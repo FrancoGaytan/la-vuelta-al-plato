@@ -424,10 +424,21 @@ func _check_wash_alert(delta: float) -> void:
 
 func _sink_drop(data: Dictionary) -> void:
 	var k: String = data.get("tool", "")
-	if sink_item != null or not k in dirty:
+	if not k in dirty:
+		return
+	if not SinkView.can_stack(sink_item, k):
+		if sink_item != null and sink_item["kind"] != k:
+			_hint("En la pileta sólo se lavan juntas piezas del mismo tipo")
+		else:
+			_hint("Ya hay %d en la pileta: no entran más" % SinkView.MAX_STACK)
 		return
 	dirty.erase(k)
-	sink_item = SinkView.new_item(k, rng.randi() % 100000)
+	if sink_item == null:
+		sink_item = SinkView.new_item(k, rng.randi() % 100000)
+	else:
+		SinkView.add_to_stack(sink_item)    # se apila: tarda más en proporción
+		if sink_item.get("soaped", false):
+			sponge_soap = maxf(0.0, sponge_soap - 1.0 / SinkView.SOAP_ITEMS)
 	_play_sfx("chapoteo" if sink_pool > 0.08 else "plato", -6.0)
 	_refresh_station()
 
@@ -495,8 +506,10 @@ func _rack_drop(data: Dictionary) -> void:
 	if sink_item == null or sink_item["dirt"] > 0.0 or not sink_item["bubbles"].is_empty():
 		return
 	var k: String = data.get("tool", sink_item["kind"])
-	clean_stock[k] = clean_stock.get(k, 0) + 1
-	rack_recent.append({"kind": k, "t": Time.get_ticks_msec() / 1000.0})
+	var cnt: int = sink_item.get("count", 1)
+	clean_stock[k] = clean_stock.get(k, 0) + cnt
+	for j in cnt:
+		rack_recent.append({"kind": k, "t": Time.get_ticks_msec() / 1000.0})
 	var plates := rack_recent.filter(func(r): return r["kind"] == "plato")
 	var others := rack_recent.filter(func(r): return r["kind"] != "plato")
 	rack_recent = plates.slice(-6) + others.slice(-3)
@@ -506,7 +519,7 @@ func _rack_drop(data: Dictionary) -> void:
 
 
 func _dirty_count() -> int:
-	return dirty.size() + (1 if sink_item != null else 0)
+	return dirty.size() + (sink_item.get("count", 1) if sink_item != null else 0)
 
 
 func _build_sink_station() -> void:
@@ -514,7 +527,7 @@ func _build_sink_station() -> void:
 		Art.draw_kitchen_wall(ci, Rect2(0, 0, 1280, 300))
 		Art.draw_wood_counter(ci, Rect2(0, 300, 1280, STATION_SIZE.y - 300))
 	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
-	_tag("Bacha  ·  sucio a la pileta → detergente → frotá las manchas → enjuagá bajo el chorro → al escurridor", Vector2(12, 4), 15)
+	_tag("Bacha  ·  sucio a la pileta (podés juntar varios iguales) → detergente → frotá → enjuagá → al escurridor", Vector2(12, 4), 15)
 	# Izquierda: la pila de sucios, agrupada por tipo (los platos, apilados)
 	_tag("Sucio (%d)" % dirty.size(), Vector2(24, 44), 15)
 	var counts := {}
@@ -677,8 +690,8 @@ func _process(delta: float) -> void:
 	if not playing:
 		if close_button != null and close_button.visible:
 			close_button.visible = false
-		if not cook_players.is_empty():
-			_stop_cook_audio()
+		if not cook_players.is_empty() or water_player != null:
+			_stop_cook_audio()      # también corta la canilla
 		return
 	if paused:
 		return
@@ -1248,7 +1261,7 @@ func _show_intro(i: int) -> void:
 		col.add_child(l)
 	var tip := "La barra de cocción marca en verde el punto ideal: sacá la comida cuando la barra esté adentro."
 	if lv.get("drinks", false):
-		tip = "Cada pedido viene con bebida: arrastrala desde la heladera del emplatado (abajo a la derecha) hasta el plato."
+		tip = "Cada pedido viene con bebida: en la Entrega (tecla 5) arrastrala desde la heladera hasta la bandeja antes de servir."
 	elif not lv["show_zone"]:
 		tip = "Desde hoy la barra NO marca el punto: mirá el reloj, el termómetro de las carnes y el recetario (tecla R)."
 	if i == 0:
@@ -1403,7 +1416,12 @@ func _finish_level() -> void:
 	var dirty_pen := minf(30.0, dirty_left * Data.DIRTY_REPUTATION)
 	avg = maxf(0.0, avg - dirty_pen)
 	_end_scrub()
+	# Al cerrar se cierra la canilla (y deja de sonar)
 	water_on = false
+	water_flow = 0.0
+	if water_player != null:
+		water_player.queue_free()
+		water_player = null
 	var passed := avg >= Data.PASS_SCORE
 	var has_next := level_idx + 1 < _levels().size()
 	if passed and has_next and level_idx + 1 > unlocked_level:
@@ -2646,35 +2664,59 @@ func _build_kitchen_station() -> void:
 	var fw := STATION_SIZE.x - fx - 10.0
 	var fridge_items := cook_items.filter(func(id): return not Data.ITEMS[id].get("built", false))   # la pizza se arma en la mesa
 	var n := fridge_items.size()
+	# Agrupados por tipo: carnes con carnes, pastas con pastas, verduras con verduras (un estante cada uno)
+	var groups := []
+	var placed := []
+	for g in Data.FRIDGE_GROUPS:
+		var ids: Array = g[1].filter(func(id): return id in fridge_items)
+		if not ids.is_empty():
+			groups.append([g[0], ids])
+			placed.append_array(ids)
+	var rest := fridge_items.filter(func(id): return not id in placed)
+	if not rest.is_empty():
+		groups.append(["Otros", rest])
 	var cols := clampi(int(fw / 100.0), 1, maxi(n, 1))
-	var rows := int(ceil(n / float(cols)))
+	var total_rows := 0
+	for g in groups:
+		total_rows += int(ceil(g[1].size() / float(cols)))
 	var cw := minf(fw / cols, 140.0)
-	var ch := minf(400.0 / maxi(rows, 1), 120.0)
+	var head_h := 18.0
+	var ch := minf((392.0 - head_h * groups.size()) / maxi(total_rows, 1), 120.0)
+	var shelves := []      # [y del título, nombre, y del estante]
+	var y0 := 30.0
+	for g in groups:
+		var rows_g := int(ceil(g[1].size() / float(cols)))
+		shelves.append([y0, g[0], y0 + head_h + rows_g * ch])
+		y0 += head_h + rows_g * ch
 	var draw_fridge := func(ci, _t):
 		Art.rrect(ci, Rect2(0, 0, fw, 430), Color("dfe5ea"), 10, Color("9aa3ab"), 4)
 		Art.rrect(ci, Rect2(8, 26, fw - 16, 396), Color("f6f9fb"), 6)
 		Art.text(ci, Vector2(0, 19), "HELADERA · arrastrá a la cocina", 13, Color("4a5560"), HORIZONTAL_ALIGNMENT_CENTER, fw)
-		for r in rows:
-			var y := 26.0 + (r + 1) * ch
-			ci.draw_rect(Rect2(8, y - 4, fw - 16, 4), Color("c5ccd2"))
+		for s in shelves:
+			Art.rrect(ci, Rect2(14, s[0] + 1, fw - 28, head_h - 3), Color(0.78, 0.84, 0.88, 0.6), 4)
+			Art.text(ci, Vector2(20, s[0] + 13), s[1].to_upper(), 11, Color("4a5560"))
+			ci.draw_rect(Rect2(8, s[2] - 4, fw - 16, 4), Color("c5ccd2"))
 	_painter(Rect2(fx, 30, fw, 430), draw_fridge, false)
 	if n == 0 and _uses_mesa():
 		var note := _label("Hoy en la cocina solo va el horno de leña.\n\nLa pizza se arma en la Mesa (tecla 3):\nestirás la masa, ponés salsa e ingredientes\ny la mandás al horno.", 18, Color(0.3, 0.32, 0.36))
 		note.position = Vector2(fx + 30, 150)
 		station_box.add_child(note)
-	for j in n:
-		var id: String = fridge_items[j]
-		var b := _prop(Rect2(fx + (fw - cw * cols) / 2.0 + (j % cols) * cw, 58 + (j / cols) * ch, cw, ch - 6))
-		b.texture = Art.food_raw(id)
-		b.text = Data.ITEMS[id]["name"]
-		b.text_size = 13
-		b.tooltip_text = "Arrastralo hasta %s" % Data.APPLIANCES[Data.ITEMS[id]["where"]]["name"].to_lower()
-		b.drag_data = {"kind": "raw", "item": id}
-		b.pressed.connect(_drag_hint.bind(id))
+	for gi in groups.size():
+		var ids: Array = groups[gi][1]
+		var gy: float = 30.0 + shelves[gi][0] + head_h
+		for j in ids.size():
+			var id: String = ids[j]
+			var b := _prop(Rect2(fx + (fw - cw * cols) / 2.0 + (j % cols) * cw, gy + (j / cols) * ch, cw, ch - 6))
+			b.texture = Art.food_raw(id)
+			b.text = Data.ITEMS[id]["name"]
+			b.text_size = 13
+			b.tooltip_text = "Arrastralo hasta %s" % Data.APPLIANCES[Data.ITEMS[id]["where"]]["name"].to_lower()
+			b.drag_data = {"kind": "raw", "item": id}
+			b.pressed.connect(_drag_hint.bind(id))
 	recipe_panel = null
 
 
-## Heladera de bebidas del emplatado: se arrastra la bebida hasta el plato
+## Heladera de bebidas de la Entrega: se arrastra la bebida hasta la bandeja (o click)
 func _build_drinks_fridge(o, rect: Rect2) -> void:
 	var draw_fridge := func(ci, _t):
 		Art.rrect(ci, Rect2(Vector2.ZERO, rect.size), Color("dfe5ea"), 8, Color("9aa3ab"), 3)
@@ -2693,8 +2735,8 @@ func _build_drinks_fridge(o, rect: Rect2) -> void:
 		b.text_size = 9
 		b.selected = o.get("plate_drink", "") == n
 		b.drag_data = {"kind": "drink", "name": n}
-		b.tooltip_text = "Arrastrá %s hasta el plato" % n.to_lower()
-		b.pressed.connect(_hint.bind("Arrastrá la bebida hasta el plato"))
+		b.tooltip_text = "Arrastrá %s hasta la bandeja" % n.to_lower()
+		b.pressed.connect(_on_plate_drop.bind({"kind": "drink", "name": n}))
 
 
 ## Receta del pedido elegido: un paso por ingrediente (dónde va, a qué punto y cómo viene) y lo del emplatado.
@@ -2744,7 +2786,7 @@ func _build_order_recipe(o, rect: Rect2) -> void:
 	if not tops.is_empty():
 		fin.append("Toppings: " + ", ".join(PackedStringArray(tops)))
 	if o.get("drink", "") != "":
-		fin.append("Bebida: " + o["drink"])
+		fin.append("Bebida (en la Entrega): " + o["drink"])
 	if not fin.is_empty():
 		var step := VBoxContainer.new()
 		step.add_theme_constant_override("separation", 0)
@@ -3071,7 +3113,7 @@ func _build_plating_station() -> void:
 	stack.tooltip_text = "Platos limpios que quedan. Los sucios se lavan en la Bacha (tecla 6)."
 	stack.mouse_filter = Control.MOUSE_FILTER_PASS
 	# Centro: el plato (recibe lo que se arrastra)
-	var drinks: bool = o.get("drink", "") != ""
+	var drinks := false     # las bebidas se sirven en la Entrega (se ven en el plato si ya están)
 	var plate := PlateView.new()
 	plate.position = Vector2(396 if drinks else 410, 36)
 	plate.size = Vector2(400 if drinks else 420, 384)
@@ -3200,7 +3242,16 @@ func _build_delivery_station() -> void:
 	plate.gold = _has("vajilla")
 	plate.drink = o.get("plate_drink", "")
 	plate.seed = o["id"]
+	var wants_drink: bool = o.get("drink", "") != ""
+	if wants_drink:
+		# La bebida se pone acá, en la bandeja, justo antes de servir
+		plate.accept_drops = true
+		plate.dropped.connect(_delivery_drop)
 	station_box.add_child(plate)
+	if wants_drink:
+		_build_drinks_fridge(o, Rect2(352, 160, 126, 286))
+		if o.get("plate_drink", "") == "":
+			_tag("Falta la bebida: %s" % o["drink"], Vector2(330, 128), 14)
 
 	var bell := _prop(Rect2(800, 330, 120, 126))
 	bell.texture = Art.tex("kitchen/bell")
@@ -3412,3 +3463,9 @@ func _button(text: String, cb: Callable, size := 20) -> Button:
 func _close_now() -> void:
 	if playing and closing:
 		_finish_level()
+
+
+## En la Entrega la bandeja sólo recibe la bebida
+func _delivery_drop(data: Dictionary) -> void:
+	if data.get("kind", "") == "drink":
+		_on_plate_drop(data)

@@ -25,6 +25,13 @@ const TOOLS := {
 	"pala": {"name": "Pala", "stock": 2, "uses": 3},
 	"tabla": {"name": "Tabla", "stock": 4, "uses": 3},
 }
+# Heladera de la cocina: los ingredientes van agrupados por tipo
+const FRIDGE_GROUPS := [
+	["Carnes", ["milanesa", "bife", "pollo", "hamburguesa"]],
+	["Pastas y arroz", ["spaghetti", "noquis", "ravioles", "fettuccine", "arroz"]],
+	["Verduras", ["papas_fritas", "calabaza", "berenjena", "morron"]],
+	["Dulces", ["panqueque"]],
+]
 const TOOL_ORDER := ["plato", "olla", "espatula", "canasto", "bandeja", "pala", "tabla"]
 const TOOL_FOR := {"olla": "olla", "plancha": "espatula", "freidora": "canasto", "horno": "bandeja", "horno_lena": "pala"}
 const DIRTY_FOOD := 0.8       # cocinar con un utensilio sucio: la comida vale 80%

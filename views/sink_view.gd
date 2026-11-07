@@ -12,6 +12,7 @@ const STREAM_OFF := Vector2(52.0 / S, 0.0)   # el chorro cae a la derecha del ce
 const SPONGE_R := 0.17               # radio de la esponja en unidades de S (grande: agarra varias manchas)
 const SCRUB_PX := 95.0               # px de frotado (con detergente) para sacar una mancha
 const SOAP_ITEMS := 2.0              # una carga de detergente alcanza para lavar 2 cosas enteras
+const MAX_STACK := 5                 # cuántas piezas del mismo tipo entran juntas en la pileta
 
 var item = null
 var flow := 0.0          # 0-1, cuánto agua sale
@@ -68,7 +69,7 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _can_drop_data(_at: Vector2, data: Variant) -> bool:
-	return data is Dictionary and data.get("kind", "") == "dirty" and item == null
+	return data is Dictionary and data.get("kind", "") == "dirty" and can_stack(item, data.get("tool", ""))
 
 
 func _drop_data(_at: Vector2, data: Variant) -> void:
@@ -79,19 +80,24 @@ func _get_drag_data(at: Vector2) -> Variant:
 	if not is_clean() or not item_rect().has_point(at):
 		return null
 	var k: String = item["kind"]
+	var cnt: int = item.get("count", 1)
 	var p = load("res://views/painter.gd").new()
 	p.size = Vector2(110, 100)
 	p.position = Vector2(-55, -50)
 	p.animate = true
 	p.fn = func(ci, t):
+		for j in range(cnt - 1, 0, -1):
+			Art.draw_tool(ci, Rect2(-5.0 * j, 4.0 * j, 110, 100), k, 0.0, 0.0, false)
 		Art.draw_tool(ci, Rect2(0, 0, 110, 100), k, 0.0, 0.0, true)
+		if cnt > 1:
+			Art.text(ci, Vector2(70, 10), "x%d" % cnt, 18, Color.WHITE, HORIZONTAL_ALIGNMENT_LEFT, -1, 4)
 		for d in 3:      # gotea mientras se lleva
 			var ph := fmod(t * 1.6 + d * 0.33, 1.0)
 			ci.draw_circle(Vector2(40 + d * 15, 84 + ph * 40), 2.2, Color(0.7, 0.88, 1.0, 1.0 - ph))
 	var ghost := Control.new()
 	ghost.add_child(p)
 	set_drag_preview(ghost)
-	return {"kind": "clean", "tool": k}
+	return {"kind": "clean", "tool": k, "count": cnt}
 
 
 # ---------------------------------------------------------------------
@@ -101,7 +107,21 @@ func _get_drag_data(at: Vector2) -> Variant:
 static func new_item(kind: String, seed: int) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
-	return {"kind": kind, "seed": seed, "spots": Art.make_dirt(kind, rng), "bubbles": [], "dirt": 1.0, "foam": 0.0}
+	return {"kind": kind, "seed": seed, "spots": Art.make_dirt(kind, rng), "bubbles": [], "dirt": 1.0, "foam": 0.0, "count": 1}
+
+
+## ¿Se puede sumar otra pieza de este tipo a la pileta? (sólo del mismo tipo, hasta MAX_STACK)
+static func can_stack(it, kind: String) -> bool:
+	return it == null or (it["kind"] == kind and it.get("count", 1) < MAX_STACK)
+
+
+## Suma una pieza sucia a la pila: la mugre se reparte (la pila queda más sucia en promedio)
+static func add_to_stack(it: Dictionary) -> void:
+	var n: int = it.get("count", 1)
+	for sp in it["spots"]:
+		sp["hp"] = minf(1.0, (sp["hp"] * n + 1.0) / (n + 1))
+	it["count"] = n + 1
+	_recalc(it)
 
 
 ## Frotar con la esponja en off (unidades de S), habiéndola movido moved px.
@@ -110,7 +130,7 @@ static func scrub(it: Dictionary, off: Vector2, moved: float, soap: float, rng: 
 	var eff := 1.0 if soap > 0.0 else 0.15         # sin detergente la grasa casi no sale
 	for sp in it["spots"]:
 		if sp["hp"] > 0.0 and (sp["o"] - off).length() < SPONGE_R + sp["r"]:
-			sp["hp"] -= moved / SCRUB_PX * eff
+			sp["hp"] -= moved / SCRUB_PX * eff / it.get("count", 1)   # varias juntas: tarda proporcional
 			if sp["hp"] < 0.04:
 				sp["hp"] = 0.0
 	if soap > 0.0 and off.length() < 0.5:
@@ -130,6 +150,11 @@ static func scrub(it: Dictionary, off: Vector2, moved: float, soap: float, rng: 
 ## Enjuague: el chorro se lleva la espuma (rápido donde cae, más lento alrededor; la esponja bajo el agua ayuda)
 static func rinse(it: Dictionary, delta: float, flow: float, sponge = null) -> void:
 	if flow <= 0.0:
+		_recalc(it)
+		return
+	# Ya fregado y bajo el chorro: queda limpio en el acto (no hace falta esperar)
+	if it["dirt"] <= 0.0 and flow >= 0.5:
+		it["bubbles"] = []
 		_recalc(it)
 		return
 	var keep := []
@@ -175,7 +200,13 @@ func _draw() -> void:
 	var ir := item_rect()
 	var hint := "Arrastrá algo sucio a la pileta"
 	if item != null:
+		var cnt: int = item.get("count", 1)
+		for j in range(cnt - 1, 0, -1):     # las de abajo de la pila, corridas
+			Art.draw_tool(self, Rect2(ir.position + Vector2(-7.0 * j, 6.0 * j), ir.size), item["kind"], minf(1.0, item["dirt"] * 1.3), 0.0, false, item["seed"] + j)
 		Art.draw_tool(self, ir, item["kind"], 0.0, 0.0, is_clean())
+		if cnt > 1:
+			Art.rrect(self, Rect2(ir.end.x - 44, ir.position.y - 4, 46, 26), Color(0.12, 0.09, 0.07, 0.85), 8)
+			Art.text(self, Vector2(ir.end.x - 44, ir.position.y + 16), "x%d" % cnt, 17, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 46)
 		Art.draw_dirt_spots(self, ir, item["spots"])
 		Art.draw_bubbles(self, ir, item["bubbles"])
 		if is_clean():
