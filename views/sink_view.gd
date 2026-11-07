@@ -9,8 +9,9 @@ signal dropped(data: Dictionary)
 const Art = preload("res://art.gd")
 const S := 160.0                     # tamaño de referencia de la pieza (unidades de las manchas)
 const STREAM_OFF := Vector2(52.0 / S, 0.0)   # el chorro cae a la derecha del centro de la pieza
-const SPONGE_R := 0.13               # radio de la esponja en unidades de S
-const SCRUB_PX := 240.0              # px de frotado (con detergente) para sacar una mancha
+const SPONGE_R := 0.17               # radio de la esponja en unidades de S (grande: agarra varias manchas)
+const SCRUB_PX := 95.0               # px de frotado (con detergente) para sacar una mancha
+const SOAP_ITEMS := 2.0              # una carga de detergente alcanza para lavar 2 cosas enteras
 
 var item = null
 var flow := 0.0          # 0-1, cuánto agua sale
@@ -103,9 +104,10 @@ static func new_item(kind: String, seed: int) -> Dictionary:
 	return {"kind": kind, "seed": seed, "spots": Art.make_dirt(kind, rng), "bubbles": [], "dirt": 1.0, "foam": 0.0}
 
 
-## Frotar con la esponja en off (unidades de S), habiéndola movido moved px. Devuelve el detergente gastado.
-static func scrub(it: Dictionary, off: Vector2, moved: float, soap: float, rng: RandomNumberGenerator) -> float:
-	var eff := 1.0 if soap > 0.0 else 0.3          # sin detergente la grasa casi no sale
+## Frotar con la esponja en off (unidades de S), habiéndola movido moved px.
+## soap > 0: la pieza tiene detergente (una carga de la esponja alcanza para SOAP_ITEMS piezas enteras).
+static func scrub(it: Dictionary, off: Vector2, moved: float, soap: float, rng: RandomNumberGenerator) -> void:
+	var eff := 1.0 if soap > 0.0 else 0.15         # sin detergente la grasa casi no sale
 	for sp in it["spots"]:
 		if sp["hp"] > 0.0 and (sp["o"] - off).length() < SPONGE_R + sp["r"]:
 			sp["hp"] -= moved / SCRUB_PX * eff
@@ -113,7 +115,7 @@ static func scrub(it: Dictionary, off: Vector2, moved: float, soap: float, rng: 
 				sp["hp"] = 0.0
 	if soap > 0.0 and off.length() < 0.5:
 		var bubbles: Array = it["bubbles"]
-		var n := int(moved / 9.0)
+		var n := int(moved / 7.0)
 		for k in n:
 			if bubbles.size() >= 120:
 				# Ya está llena de espuma: se refresca la que está bajo la esponja
@@ -123,7 +125,6 @@ static func scrub(it: Dictionary, off: Vector2, moved: float, soap: float, rng: 
 			bubbles.append({"o": off + Vector2.from_angle(rng.randf() * TAU) * rng.randf() * SPONGE_R,
 				"r": rng.randf_range(3.0, 8.0), "life": 1.0})
 	_recalc(it)
-	return moved / 1600.0 if soap > 0.0 else 0.0
 
 
 ## Enjuague: el chorro se lleva la espuma (rápido donde cae, más lento alrededor; la esponja bajo el agua ayuda)
@@ -135,12 +136,12 @@ static func rinse(it: Dictionary, delta: float, flow: float, sponge = null) -> v
 	for b in it["bubbles"]:
 		var d: Vector2 = b["o"] - STREAM_OFF
 		var near := maxf(0.0, 1.0 - d.length() / 0.2)
-		var speed := flow * (0.22 + 2.4 * near)
-		if sponge != null and (b["o"] - sponge).length() < SPONGE_R * 1.3:
-			speed += flow * 1.6
+		var speed := flow * (0.7 + 4.0 * near)
+		if sponge != null and (b["o"] - sponge).length() < SPONGE_R * 1.4:
+			speed += flow * 3.5
 		b["life"] -= delta * speed
 		# El agua empuja la espuma hacia afuera y para abajo
-		b["o"] += (d.normalized() * 0.1 + Vector2(0, 0.06)) * delta * flow
+		b["o"] += (d.normalized() * 0.18 + Vector2(0, 0.08)) * delta * flow
 		if b["o"].length() > 0.5:
 			b["life"] -= delta * 2.0
 		if b["life"] > 0.0:

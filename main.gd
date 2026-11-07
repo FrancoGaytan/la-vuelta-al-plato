@@ -137,6 +137,11 @@ var soap_warned := false
 var scrub_speed := 0.0
 var wash_alert := 0                   # 0 ok, 1 se apilan, 2 urgente
 var wash_alert_t := 0.0
+var tool_uses_left := {}              # utensilio en uso -> cuántos usos le quedan antes de ir a lavar
+var tool_clean_now := {}              # si el que está en uso salió limpio
+var tool_last := false
+var closing := false                  # ya se atendió a todos: falta lavar y cerrar
+var close_button: Button = null
 var mesa_pizza = null                # Italia: la pizza que se está armando en la mesa {stretch, sauce, sprinkles, plate_toppings}
 var mesa_view = null
 var pending_order: Dictionary = {}   # pedido que la moza está anotando
@@ -337,11 +342,9 @@ func _update_washing(delta: float) -> void:
 			if sink_item != null and sink_view.is_over_item(local):
 				sponge_off = sink_view.to_item(local)
 				if moved > 0.0:
-					var had_soap := sponge_soap > 0.0
-					sponge_soap = maxf(0.0, sponge_soap - SinkView.scrub(sink_item, sponge_off, moved, sponge_soap, rng))
-					if had_soap and sponge_soap <= 0.0:
-						_hint("Se acabó el detergente de la esponja: tocá la botella")
-					elif not had_soap and sink_item["dirt"] > 0.0 and not soap_warned:
+					_soap_item()
+					SinkView.scrub(sink_item, sponge_off, moved, 1.0 if sink_item.get("soaped", false) else 0.0, rng)
+					if not sink_item.get("soaped", false) and sink_item["dirt"] > 0.0 and not soap_warned:
 						soap_warned = true
 						_hint("Sin detergente casi no sale la grasa: tocá la botella")
 				scrub_sound_t -= delta
@@ -355,7 +358,7 @@ func _update_washing(delta: float) -> void:
 		sink_view.item = sink_item
 		sink_view.flow = water_flow
 		sink_view.pool = sink_pool
-		sink_view.soap = sponge_soap
+		sink_view.soap = 1.0 if sink_item != null and sink_item.get("soaped", false) else sponge_soap
 	# Sonido de la canilla (más fuerte y agudo si el chorro pega sobre algo)
 	var want := water_flow > 0.05 and sfx_on
 	if want and water_player == null:
@@ -433,6 +436,17 @@ func _toggle_water() -> void:
 	water_on = not water_on
 	if current_station == 5:
 		_refresh_station()
+
+
+## La pieza toma su parte de detergente la primera vez que se la friega con la esponja cargada:
+## desde ahí le alcanza hasta quedar limpia (nunca se acaba a mitad de una pieza).
+func _soap_item() -> void:
+	if sink_item == null or sink_item.get("soaped", false) or sponge_soap <= 0.0:
+		return
+	sink_item["soaped"] = true
+	sponge_soap = maxf(0.0, sponge_soap - 1.0 / SinkView.SOAP_ITEMS)
+	if sponge_soap <= 0.01:
+		sponge_soap = 0.0
 
 
 func _load_soap() -> void:
@@ -534,7 +548,7 @@ func _build_sink_station() -> void:
 	sink_view.item = sink_item
 	sink_view.flow = water_flow
 	sink_view.pool = sink_pool
-	sink_view.soap = sponge_soap
+	sink_view.soap = 1.0 if sink_item != null and sink_item.get("soaped", false) else sponge_soap
 	sink_view.faucet_pressed.connect(_toggle_water)
 	sink_view.dropped.connect(_sink_drop)
 	station_box.add_child(sink_view)
@@ -661,6 +675,8 @@ func _update_music_button() -> void:
 
 func _process(delta: float) -> void:
 	if not playing:
+		if close_button != null and close_button.visible:
+			close_button.visible = false
 		if not cook_players.is_empty():
 			_stop_cook_audio()
 		return
@@ -717,7 +733,15 @@ func _process(delta: float) -> void:
 	_update_ticket_texts()
 
 	if spawned >= level["customers"] and queue.is_empty() and orders.is_empty():
-		_finish_level()
+		# Ya no queda nadie: se cierra solo cuando no queda nada sucio (o con el botón)
+		if _dirty_count() == 0:
+			_finish_level()
+		elif not closing:
+			closing = true
+			_hint("¡Atendiste a todos! Lavá lo que quedó y el local cierra solo, o cerralo ya (lo sucio baja la reputación)")
+		if closing and close_button != null:
+			close_button.visible = playing
+			close_button.text = "Cerrar el local (%d sin lavar)" % _dirty_count()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1233,7 +1257,7 @@ func _show_intro(i: int) -> void:
 			"3. Tabla: arrastrá la verdura hasta la tabla y cortala (click en la tabla o barra espaciadora).\n" + \
 			"4. Emplatado: arrastrá al plato lo de la bandeja y la salsa. Los toppings se desparraman: mantené el bowl apretado sobre la comida.\n" + \
 			"5. Entrega: tocá la campanita para servir.\n" + \
-			"6. Bacha: ollas, espátulas, tablas y platos quedan sucios. Frotalos con la esponja, enjuagá con el grifo y ponelos a secar. Lo que quede sucio al cerrar baja la reputación.\n" + \
+			"6. Bacha: los platos (y, con el uso, ollas, espátulas y tablas) quedan sucios. Detergente a la esponja, frotá las manchas, enjuagá y al escurridor. Al final del día lavá lo que quedó: lo sucio al cerrar baja la reputación.\n" + \
 			"Click en un ticket para elegir con qué pedido trabajás. Teclas 1 a 6: cambiar de estación.\n\n" + tip
 	var tl := _label(tip, 14, COL_INK)
 	tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1295,6 +1319,11 @@ func _start_level(i: int) -> void:
 	soap_warned = false
 	wash_alert = 0
 	wash_alert_t = 0.0
+	tool_uses_left = {}
+	tool_clean_now = {}
+	closing = false
+	if close_button != null:
+		close_button.visible = false
 	pending_order = {}
 	selected_id = -1
 	current_station = 0
@@ -1364,6 +1393,9 @@ func _update_day_intro(delta: float) -> bool:
 
 func _finish_level() -> void:
 	playing = false
+	closing = false
+	if close_button != null:
+		close_button.visible = false
 	_play_sfx("puerta")
 	var avg := score_sum / (served + lost) if served + lost > 0 else 0.0   # los que se fueron cuentan como 0
 	# Lo que quedó sucio al cerrar baja la reputación del día
@@ -1569,17 +1601,31 @@ func _cook(item_id: String) -> void:
 	var target: float = _target_for(o, item_id) if o != null else info["target"]
 	slots[idx] = {"item": item_id, "t": 0.0, "target": target, "burn": info["burn"],
 		"dirty_tool": not _take_tool(Data.TOOL_FOR.get(info["where"], ""))}
+	slots[idx]["tool_last"] = tool_last
 	_refresh_all()
 
 
-## Toma un utensilio limpio. Si no queda ninguno, se usa uno sucio (devuelve false y avisa).
+## Toma un utensilio. Cada uno aguanta varios usos antes de ir a lavar (el plato, uno solo):
+## mientras le queden usos se sigue con el mismo. Si hay que agarrar otro y no quedan limpios,
+## se usa uno sucio (devuelve false y avisa). tool_last = true si con este uso ya queda para lavar.
 func _take_tool(kind: String) -> bool:
+	tool_last = false
 	if kind == "":
 		return true
+	var left: int = tool_uses_left.get(kind, 0)
+	if left > 0:
+		tool_uses_left[kind] = left - 1
+		tool_last = left - 1 == 0
+		return tool_clean_now.get(kind, true)
+	var uses: int = Data.TOOLS[kind].get("uses", 1)
+	tool_uses_left[kind] = uses - 1
+	tool_last = uses - 1 == 0
 	if clean_stock.get(kind, 0) > 0:
 		clean_stock[kind] -= 1
+		tool_clean_now[kind] = true
 		return true
 	dirty.erase(kind)       # se agarra uno de la pila de sucios
+	tool_clean_now[kind] = false
 	var name: String = Data.TOOLS[kind]["name"].to_lower()
 	_hint("No queda %s limpio: se usa uno sucio. Lavá en la Bacha (tecla 6)" % name)
 	return false
@@ -1596,8 +1642,8 @@ func _take_off(appliance: String, idx: int) -> void:
 	cookers[appliance][idx] = null
 	var t: float = slot["t"]
 	var tool: String = Data.TOOL_FOR.get(appliance, "")
-	if tool != "":
-		dirty.append(tool)        # el utensilio que se usó queda sucio
+	if tool != "" and slot.get("tool_last", true):
+		dirty.append(tool)        # se gastaron sus usos: va a lavar
 	if slot.has("ta"):
 		# Pizza: se lleva su armado y la cocción de cada mitad
 		var pz: Dictionary = slot["pizza"]
@@ -1640,7 +1686,7 @@ func _cook_quality(t: float, target: float, burn: float) -> float:
 	var diff := absf(t - target)
 	if diff <= Data.ZONE:
 		return 100.0
-	return clampf(100.0 - (diff - Data.ZONE) * 22.0, 0.0, 100.0)
+	return clampf(100.0 - (diff - Data.ZONE) * Data.COOK_PENALTY, 0.0, 100.0)
 
 
 # =====================================================================
@@ -1654,6 +1700,7 @@ func _start_chop(item_id: String) -> void:
 	if _has("procesadora"):
 		cuts = int(ceil(cuts / 2.0))
 	board = {"item": item_id, "cuts": 0, "need": cuts, "dirty_tool": not _take_tool("tabla")}
+	board["tool_last"] = tool_last
 	_refresh_all()
 
 
@@ -1666,7 +1713,8 @@ func _chop() -> void:
 		var item_name: String = Data.ITEMS[board["item"]]["name"]
 		prepared.append({"item": board["item"], "t": -1.0, "label": item_name + " cortada",
 			"pantry": false, "chopped": true, "dirty": board.get("dirty_tool", false)})
-		dirty.append("tabla")
+		if board.get("tool_last", true):
+			dirty.append("tabla")
 		board = null
 		_refresh_all()
 	elif board_view != null and is_instance_valid(board_view):
@@ -1676,7 +1724,7 @@ func _chop() -> void:
 
 
 func _drop_chop() -> void:
-	if board != null:
+	if board != null and board.get("tool_last", true):
 		dirty.append("tabla")
 	board = null
 	_refresh_all()
@@ -2238,6 +2286,10 @@ func _build_ui() -> void:
 	ticket_rail.size = Vector2(1260, 128)
 	ticket_rail.add_theme_constant_override("separation", 8)
 	add_child(ticket_rail)
+	close_button = _button("Cerrar el local", _close_now, 20)
+	close_button.position = Vector2(900, 92)
+	close_button.visible = false
+	add_child(close_button)
 
 	station_box = Control.new()
 	station_box.position = Vector2(0, 184)
@@ -2895,6 +2947,7 @@ func _mesa_to_oven() -> void:
 	mesa_pizza = null
 	_hint("¡Al horno! Girala con la pala a mitad de cocción")
 	slots[idx]["dirty_tool"] = not _take_tool("pala")
+	slots[idx]["tool_last"] = tool_last
 	_refresh_all()
 
 
@@ -3354,3 +3407,8 @@ func _button(text: String, cb: Callable, size := 20) -> Button:
 	b.add_theme_font_size_override("font_size", size)
 	b.pressed.connect(cb)
 	return b
+
+
+func _close_now() -> void:
+	if playing and closing:
+		_finish_level()

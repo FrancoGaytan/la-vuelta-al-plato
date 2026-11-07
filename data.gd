@@ -3,7 +3,8 @@ extends RefCounted
 ## Para agregar contenido nuevo alcanza con editar este archivo.
 
 const PASS_SCORE := 60.0   # promedio mínimo para desbloquear el día siguiente
-const ZONE := 0.75         # margen (segundos) alrededor del punto ideal de cocción
+const ZONE := 1.0          # margen alrededor del punto ideal de cocción (en unidades de cocción)
+const COOK_PENALTY := 14.0  # puntos que se pierden por cada unidad fuera del margen
 
 # Lo que se pierde de la caja al tirar comida a la basura
 const WASTE_COST := {"cook": 3, "chop": 1, "ready": 2, "condiment": 1}
@@ -12,23 +13,23 @@ const LEAVE_FACTOR := 2.3      # si esperan más que paciencia x esto, se van y 
 const COOK_SLOW := 1.35       # ritmo de cocción: todo se cocina un 35% más lento que los tiempos de las recetas
 const SPRINKLE_TIME := 2.0   # segundos que hay que desparramar un topping sobre la comida
 
-# Lavado: cada utensilio que se usa queda sucio. Hay un stock limpio por día.
+# Lavado: los utensilios se ensucian con el uso (uses = cuántas veces se usan antes de ir a lavar;
+# el plato, una sola). Hay un stock limpio por día.
 # Si se acaba, se usa uno sucio (la comida o el plato bajan de nota).
 const TOOLS := {
-	"plato": {"name": "Plato", "stock": 6},
-	"olla": {"name": "Olla", "stock": 4},
-	"espatula": {"name": "Espátula", "stock": 3},
-	"canasto": {"name": "Canasto", "stock": 3},
-	"bandeja": {"name": "Bandeja", "stock": 3},
-	"pala": {"name": "Pala", "stock": 2},
-	"tabla": {"name": "Tabla", "stock": 5},
+	"plato": {"name": "Plato", "stock": 6, "uses": 1},
+	"olla": {"name": "Olla", "stock": 4, "uses": 2},
+	"espatula": {"name": "Espátula", "stock": 3, "uses": 3},
+	"canasto": {"name": "Canasto", "stock": 3, "uses": 3},
+	"bandeja": {"name": "Bandeja", "stock": 3, "uses": 2},
+	"pala": {"name": "Pala", "stock": 2, "uses": 3},
+	"tabla": {"name": "Tabla", "stock": 4, "uses": 3},
 }
 const TOOL_ORDER := ["plato", "olla", "espatula", "canasto", "bandeja", "pala", "tabla"]
 const TOOL_FOR := {"olla": "olla", "plancha": "espatula", "freidora": "canasto", "horno": "bandeja", "horno_lena": "pala"}
 const DIRTY_FOOD := 0.8       # cocinar con un utensilio sucio: la comida vale 80%
 const DIRTY_PLATE := 0.75     # servir en plato sucio: el plato vale 75%
 const DIRTY_REPUTATION := 2.5 # al cerrar, cada cosa sin lavar baja la reputación del día (máximo 30)
-const SCRUB_NEEDED := 900.0   # cuánto hay que frotar con la esponja (en píxeles de movimiento)
 
 # Salero: lo que va en la plancha o la olla (con "salt": true) se sala sacudiendo el salero encima.
 # 1.0 = bien salado (≈1 segundo de sacudir). Entre SALT_OK.x y SALT_OK.y está perfecto.
@@ -177,30 +178,30 @@ const RECIPES := {
 # show_zone: la barra de cocción marca el punto ideal (en los días difíciles hay que medir el tiempo)
 const LEVELS := [
 	{"name": "Día 1 · Primeros pasos", "new": ["spaghetti", "milanesa"], "customers": 4,
-		"interval": [16.0, 22.0], "patience": 100.0, "max_toppings": 1, "show_zone": true},
+		"interval": [24.0, 30.0], "patience": 100.0, "max_toppings": 1, "show_zone": true},
 	{"name": "Día 2 · A la plancha", "new": ["bife", "noquis"], "customers": 5,
-		"interval": [14.0, 20.0], "patience": 100.0, "max_toppings": 1, "show_zone": true},
+		"interval": [23.0, 29.0], "patience": 100.0, "max_toppings": 1, "show_zone": true},
 	{"name": "Día 3 · De la huerta", "new": ["ensalada", "pollo"], "customers": 6,
-		"interval": [13.0, 18.0], "patience": 105.0, "max_toppings": 2, "show_zone": true},
+		"interval": [22.0, 28.0], "patience": 105.0, "max_toppings": 2, "show_zone": true},
 	{"name": "Día 4 · A ojo de cocinero", "new": ["hamburguesa", "asadas", "ravioles"], "customers": 7,
-		"interval": [13.0, 18.0], "patience": 110.0, "max_toppings": 2, "show_zone": false},
+		"interval": [22.0, 28.0], "patience": 110.0, "max_toppings": 2, "show_zone": false},
 	{"name": "Día 5 · Dulce final", "new": ["wok", "flan"], "customers": 8,
-		"interval": [12.0, 17.0], "patience": 115.0, "max_toppings": 2, "show_zone": false},
+		"interval": [21.0, 27.0], "patience": 115.0, "max_toppings": 2, "show_zone": false},
 	{"name": "Día 6 · Lleno total", "new": ["panqueques"], "customers": 10,
-		"interval": [12.0, 17.0], "patience": 120.0, "max_toppings": 3, "show_zone": false},
+		"interval": [21.0, 27.0], "patience": 120.0, "max_toppings": 3, "show_zone": false},
 	# Desde el Día 7 cada pedido viene con bebida: se sirve desde la heladera del emplatado
 	{"name": "Día 7 · Con bebida", "new": [], "customers": 10, "drinks": true,
-		"interval": [12.0, 17.0], "patience": 125.0, "max_toppings": 3, "show_zone": false},
+		"interval": [22.0, 28.0], "patience": 125.0, "max_toppings": 3, "show_zone": false},
 ]
 
 # Días de la Trattoria del Forno (Roma)
 const ITALY_LEVELS := [
 	{"name": "Giorno 1 · La pizzería", "new": ["pizza"], "customers": 5,
-		"interval": [18.0, 24.0], "patience": 110.0, "max_toppings": 2, "show_zone": true},
+		"interval": [28.0, 34.0], "patience": 110.0, "max_toppings": 2, "show_zone": true},
 	{"name": "Giorno 2 · Pasta fresca", "new": ["fettuccine", "tiramisu"], "customers": 6,
-		"interval": [15.0, 21.0], "patience": 110.0, "max_toppings": 2, "show_zone": true},
+		"interval": [26.0, 32.0], "patience": 110.0, "max_toppings": 2, "show_zone": true},
 	{"name": "Giorno 3 · Noche romana", "new": [], "customers": 8, "drinks": true,
-		"interval": [14.0, 19.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
+		"interval": [25.0, 31.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
 ]
 
 # =====================================================================
