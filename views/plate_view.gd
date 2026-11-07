@@ -12,6 +12,7 @@ var toppings: Array = []
 var sprinkles: Dictionary = {}   # toppings desparramados a mano: {nombre: {amount, pts}}
 var seed := 1
 var gold := false                # vajilla con borde dorado (mejora)
+var drink := ""                  # bebida servida al lado del plato (desde el Día 7)
 var accept_drops := false:
 	set(value):
 		accept_drops = value
@@ -96,6 +97,10 @@ func _draw() -> void:
 		Art.draw_sauce(self, sp, item_size * 0.22, Art.SAUCE_COLORS.get(sauce, Color.WHITE), seed)
 	if not sprinkles.is_empty():
 		Art.draw_sprinkles(self, c, food_radius(), sprinkles)
+	if drink != "":
+		var Data = load("res://data.gd")
+		var dh := rect.size.y * 0.34
+		Art.draw_drink(self, Rect2(rect.end.x - dh * 0.55, rect.position.y - dh * 0.05, dh * 0.6, dh), drink, Data.DRINKS)
 	if _splash > 0.0:
 		draw_arc(c, rect.size.x * (0.3 + 0.25 * (1.0 - _splash)), 0, TAU, 40, Color(1, 1, 1, _splash * 0.8), 4)
 

@@ -94,6 +94,11 @@ func _gui_input(event: InputEvent) -> void:
 		slot_clicked.emit(i)
 
 
+## Lugar ocupado que está debajo del mouse (lo usa el salero)
+func slot_under_mouse() -> int:
+	return _slot_at(get_local_mouse_position())
+
+
 func _slot_at(p: Vector2) -> int:
 	for i in slots.size():
 		if slots[i] != null and _hit_rect(i).has_point(p):
@@ -126,6 +131,16 @@ func _draw() -> void:
 func _food(i: int, s) -> void:
 	var rect := _food_rect(i)
 	Art.draw_cooking(self, s["item"], rect, s["t"], s["target"], s["burn"])
+	# Granitos de sal encima (en la olla se disuelven: brillan un rato)
+	var pts: Array = s.get("salt_pts", [])
+	for k in pts.size():
+		var p: Vector2 = rect.get_center() + pts[k] * rect.size * 0.5
+		if kind == "olla":
+			var a := clampf(1.0 - (k + 1) / float(pts.size() + 1), 0.0, 1.0) * 0.6
+			draw_circle(p, 1.2, Color(1, 1, 1, a))
+		else:
+			draw_circle(p, 1.3, Color(1, 1, 1, 0.9))
+			draw_circle(p + Vector2(0.5, 0.5), 0.6, Color(0.7, 0.75, 0.8, 0.8))
 	var info: Dictionary = Data.ITEMS[s["item"]]
 	if info.has("temps"):
 		# Termómetro clavado en la carne
@@ -471,3 +486,21 @@ func _draw_chip(rect: Rect2, s, time: float) -> void:
 	draw_rect(Rect2(bar.position, Vector2(minf(t, burn) * px, bar.size.y)), Color("f5d7a1").lerp(Color("8b4a1c"), minf(t / burn, 1.0)))
 	if show_zone:
 		draw_rect(Rect2(bar.position.x + maxf(target - Data.ZONE, 0.0) * px, bar.position.y - 1, Data.ZONE * 2.0 * px, bar.size.y + 2), Color(0.4, 1, 0.4), false, 1.5)
+	# Indicador de sal ("S"): gris sin sal, naranja le falta, verde bien, rojo se pasó
+	if kind in ["plancha", "olla"]:
+		var salt: float = s.get("salt", 0.0)
+		var needs: bool = Data.ITEMS[s["item"]].get("salt", false)
+		var col := Color("7d8790")
+		if needs:
+			if salt >= Data.SALT_OK.x and salt <= Data.SALT_OK.y:
+				col = Color("3fae4a")
+			elif salt > Data.SALT_OK.y:
+				col = Color("d0281a")
+			elif salt > 0.0:
+				col = Color("e08a1a")
+		elif salt > 0.3:
+			col = Color("d0281a")
+		var sc := Vector2(rect.end.x - 2, rect.position.y - 2)
+		draw_circle(sc, 8, Color(0, 0, 0, 0.5))
+		draw_circle(sc, 7, col)
+		Art.text(self, sc + Vector2(-7, 4.5), "S", 11, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 14)

@@ -31,7 +31,35 @@ func _initialize() -> void:
 	_save(_pen(), "res://assets/sfx/birome.wav", 0.5)
 	for v in 3:
 		_save(_chop(v), "res://assets/sfx/corte%d.wav" % (v + 1), 0.6)
+	_save(_shutter(), "res://assets/sfx/persiana.wav", 0.5)
+	_save(_shaker(), "res://assets/sfx/salero.wav", 0.45)
 	quit()
+
+
+## Persiana metálica que sube: traqueteo de láminas que se va frenando
+func _shutter() -> PackedFloat32Array:
+	var buf := _one_shot(1.6)
+	var t := 0.0
+	var gap := 0.028
+	while t < 1.35:
+		var a := 0.5 * (1.0 - t / 1.5)
+		_noise_burst(buf, t, 0.012, a, 0.45, true)
+		_bell(buf, t, rng.randf_range(380.0, 520.0), a * 0.25, [1.0, 2.3], [0.04, 0.02])
+		t += gap
+		gap *= 1.018
+	# Tope al llegar arriba
+	_noise_burst(buf, 1.38, 0.05, 0.5, 0.15)
+	return buf
+
+
+## Salero: granitos que golpean el vidrio, sacudido dos veces
+func _shaker() -> PackedFloat32Array:
+	var buf := _one_shot(0.45)
+	for shake in 2:
+		var t0 := shake * 0.2
+		for g in 40:
+			_noise_burst(buf, t0 + rng.randf() * 0.12, 0.003, rng.randf_range(0.05, 0.25), 0.8, true)
+	return buf
 
 
 ## Cuchillo contra la tabla: un "toc" de madera y el crujido corto de la verdura

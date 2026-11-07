@@ -767,6 +767,110 @@ static func plant(ci: CanvasItem, base: Vector2) -> void:
 	ci.draw_rect(Rect2(base + Vector2(-29, -18), Vector2(58, 9)), Color("a8522c"))
 
 
+## Estrella de 5 puntas (dibujada: en la web no hay fuente con el símbolo ★)
+static func star(ci: CanvasItem, c: Vector2, r: float, filled: bool) -> void:
+	var pts := PackedVector2Array()
+	for k in 10:
+		var a := -PI / 2.0 + k * PI / 5.0
+		pts.append(c + Vector2.from_angle(a) * (r if k % 2 == 0 else r * 0.45))
+	if filled:
+		ci.draw_colored_polygon(pts, Color("f2b632"))
+		pts.append(pts[0])
+		ci.draw_polyline(pts, Color("b07a10"), maxf(1.0, r * 0.1), true)
+	else:
+		pts.append(pts[0])
+		ci.draw_polyline(pts, Color(0.6, 0.5, 0.35, 0.8), maxf(1.0, r * 0.1), true)
+
+
+## n estrellas llenas de 3, centradas en c
+static func stars(ci: CanvasItem, c: Vector2, r: float, n: int) -> void:
+	for k in 3:
+		star(ci, c + Vector2((k - 1) * r * 2.3, 0), r, k < n)
+
+
+## Lata o botella de bebida
+static func draw_drink(ci: CanvasItem, rect: Rect2, name: String, drinks: Dictionary) -> void:
+	var d: Dictionary = drinks.get(name, {"color": Color.WHITE, "label": Color.GRAY, "kind": "lata"})
+	var c := rect.get_center()
+	var h := rect.size.y * 0.9
+	var w := minf(rect.size.x * 0.55, h * 0.42)
+	ellipse(ci, Vector2(c.x + 2, c.y + h / 2.0), Vector2(w * 0.6, 4), Color(0, 0, 0, 0.22))
+	if d["kind"] == "lata":
+		var body := Rect2(c.x - w / 2.0, c.y - h * 0.38, w, h * 0.84)
+		rrect(ci, body, Color("c5ccd2"), 4)
+		rrect(ci, body.grow_individual(0, -5, 0, -5), d["color"], 3)
+		ci.draw_rect(Rect2(body.position.x, body.get_center().y - 6, w, 12), d["label"])
+		ci.draw_rect(Rect2(body.position.x + w * 0.15, body.position.y + 6, 3, body.size.y - 12), Color(1, 1, 1, 0.35))
+		ellipse(ci, Vector2(c.x, body.position.y + 2), Vector2(w / 2.0, 3), Color("e3e8ec"))
+		ci.draw_circle(Vector2(c.x + w * 0.15, body.position.y + 2), 2, Color("9aa3ab"))
+	else:
+		var body := Rect2(c.x - w / 2.0, c.y - h * 0.2, w, h * 0.68)
+		var neck := Rect2(c.x - w * 0.2, c.y - h * 0.44, w * 0.4, h * 0.26)
+		rrect(ci, neck, Color(d["color"], 0.85), 3)
+		rrect(ci, body, Color(d["color"], 0.85), w * 0.3)
+		rrect(ci, Rect2(c.x - w * 0.22, c.y - h * 0.48, w * 0.44, 6), d["label"], 2)
+		ci.draw_rect(Rect2(body.position.x, body.get_center().y - 5, w, 12), d["label"])
+		ci.draw_rect(Rect2(body.position.x + w * 0.18, body.position.y + 5, 3, body.size.y - 14), Color(1, 1, 1, 0.45))
+
+
+## Salero de vidrio con tapa de metal. tilt en radianes; con `pouring` caen granitos.
+static func salt_shaker(ci: CanvasItem, c: Vector2, s: float, tilt: float, pouring: bool, time: float) -> void:
+	ci.draw_set_transform(c, tilt, Vector2.ONE)
+	rrect(ci, Rect2(Vector2(-11, -6) * s, Vector2(22, 30) * s), Color(0.9, 0.95, 1.0, 0.55), 6 * s, Color(1, 1, 1, 0.8), 1)
+	rrect(ci, Rect2(Vector2(-9, 6) * s, Vector2(18, 16) * s), Color("fbfbf8"), 4 * s)
+	rrect(ci, Rect2(Vector2(-11, -15) * s, Vector2(22, 11) * s), Color("aab3ba"), 4 * s, Color("7d8790"), 1)
+	for k in 3:
+		ci.draw_circle(Vector2(-5 + k * 5, -15) * s, 1.1 * s, Color("3a3f45"))
+	ci.draw_rect(Rect2(Vector2(-8, -3) * s, Vector2(2.5, 22) * s), Color(1, 1, 1, 0.5))
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if pouring:
+		var mouth := c + Vector2(0, -18 * s).rotated(tilt)
+		for k in 7:
+			var ph := fmod(time * 3.0 + k / 7.0, 1.0)
+			ci.draw_circle(mouth + Vector2(sin(k * 2.1) * 4.0, ph * 34.0) * s / 1.2, 1.0 * s, Color(1, 1, 1, 1.0 - ph))
+
+
+## Intro del día: la persiana del local sube, el cartel pasa a ABIERTO y aparece el nombre del día.
+## p = progreso de 0 a 1.
+static func draw_day_intro(ci: CanvasItem, rect: Rect2, p: float, title: String, subtitle: String, time: float) -> void:
+	draw_dining(ci, rect, [], time)
+	draw_counter(ci, rect, rect.size.y - 250)
+	# Persiana metálica que sube (de 0.1 a 0.55)
+	var up := clampf((p - 0.1) / 0.45, 0.0, 1.0)
+	up = up * up * (3.0 - 2.0 * up)
+	var bottom := rect.size.y * (1.0 - up)
+	if bottom > 2.0:
+		grad_rect(ci, Rect2(rect.position, Vector2(rect.size.x, bottom)), Color("9aa3ab"), Color("6f7b85"))
+		var y := bottom - 22.0
+		while y > -22.0:
+			ci.draw_rect(Rect2(rect.position.x, y, rect.size.x, 3), Color(1, 1, 1, 0.18))
+			ci.draw_rect(Rect2(rect.position.x, y + 14, rect.size.x, 4), Color(0, 0, 0, 0.22))
+			y -= 26.0
+		ci.draw_rect(Rect2(rect.position.x, bottom - 14, rect.size.x, 14), Color("4a5057"))
+		rrect(ci, Rect2(rect.get_center().x - 40, bottom - 30, 80, 14), Color("2b2d31"), 6)
+	ci.draw_rect(Rect2(rect.position.x, rect.position.y, rect.size.x, 16), Color("3a3f45"))
+	# Cartel de la puerta: CERRADO -> ABIERTO (gira a la mitad)
+	var flip := clampf((p - 0.55) / 0.12, 0.0, 1.0)
+	var sx := absf(cos(flip * PI))
+	var open := flip >= 0.5
+	var sign := Rect2(rect.position + Vector2(58, 94), Vector2(94, 30))
+	if up > 0.7:
+		var sw := sign.size.x * maxf(sx, 0.05)
+		var sr := Rect2(sign.get_center().x - sw / 2.0, sign.position.y, sw, sign.size.y)
+		rrect(ci, sr, Color("2f6f4f") if open else Color("8a2a20"), 6, Color("e8e0c8"), 2)
+		if sx > 0.3:
+			text(ci, Vector2(sr.position.x, sr.position.y + 21), "ABIERTO" if open else "CERRADO", 15, Color("f4efe0"), HORIZONTAL_ALIGNMENT_CENTER, sr.size.x)
+	# Título del día que entra desde arriba
+	var t_in := clampf((p - 0.45) / 0.2, 0.0, 1.0)
+	if t_in > 0.0:
+		var banner := Rect2(rect.get_center().x - 330, rect.position.y - 140 + t_in * 330, 660, 150)
+		rrect(ci, Rect2(banner.position + Vector2(5, 8), banner.size), Color(0, 0, 0, 0.35), 14)
+		rrect(ci, banner, Color("fdf6e3"), 14, Color("c9a86a"), 4)
+		text(ci, Vector2(banner.position.x, banner.position.y + 62), title, 40, INK, HORIZONTAL_ALIGNMENT_CENTER, banner.size.x)
+		text(ci, Vector2(banner.position.x, banner.position.y + 110), subtitle, 22, Color("2f7a3a"), HORIZONTAL_ALIGNMENT_CENTER, banner.size.x)
+		text(ci, Vector2(banner.position.x, banner.position.y + 172), "(tocá para saltear)", 14, Color(1, 1, 1, 0.7), HORIZONTAL_ALIGNMENT_CENTER, banner.size.x, 4)
+
+
 ## Maceta colgante con hojas que caen. top = punto del techo.
 static func hanging_plant(ci: CanvasItem, top: Vector2, k := 1.0) -> void:
 	ci.draw_line(top, top + Vector2(0, 30) * k, Color("6b5a4a"), 1.5)

@@ -11,6 +11,22 @@ const WASTE_COST := {"cook": 3, "chop": 1, "ready": 2, "condiment": 1}
 const LEAVE_FACTOR := 2.0      # si esperan más que paciencia x esto, se van y abandonan el pedido
 const SPRINKLE_TIME := 2.0   # segundos que hay que desparramar un topping sobre la comida
 
+# Salero: lo que va en la plancha o la olla (con "salt": true) se sala sacudiendo el salero encima.
+# 1.0 = bien salado (≈1 segundo de sacudir). Entre SALT_OK.x y SALT_OK.y está perfecto.
+const SALT_TIME := 1.0
+const SALT_OK := Vector2(0.8, 2.2)
+
+
+## Cuánto afecta la sal a la calidad de algo cocinado (1 = perfecto)
+static func salt_factor(id: String, salt: float) -> float:
+	if ITEMS[id].get("salt", false):
+		if salt < SALT_OK.x:
+			return 0.55 + 0.45 * salt / SALT_OK.x     # le falta sal
+		if salt > SALT_OK.y:
+			return maxf(0.3, 1.0 - (salt - SALT_OK.y) * 0.5)   # muy salado
+		return 1.0
+	return 0.5 if salt > 0.3 else 1.0   # no llevaba sal (por ejemplo, el panqueque)
+
 # Mejoras que se compran en la tienda con los ahorros. "for": clientes o cocina.
 const UPGRADES := {
 	"plantas": {"name": "Plantas colgantes", "price": 60, "for": "Clientes",
@@ -61,20 +77,20 @@ const APPLIANCE_ORDER := ["olla", "plancha", "freidora", "horno"]
 #       "ready" se saca de la despensa y va directo al plato
 # doneness: puntos de cocción que puede pedir el cliente (reemplaza a target)
 const ITEMS := {
-	"spaghetti": {"name": "Spaghetti", "kind": "cook", "where": "olla", "target": 9.0, "burn": 16.0},
-	"noquis": {"name": "Ñoquis", "kind": "cook", "where": "olla", "target": 5.0, "burn": 10.0},
-	"ravioles": {"name": "Ravioles", "kind": "cook", "where": "olla", "target": 7.0, "burn": 13.0},
-	"arroz": {"name": "Arroz", "kind": "cook", "where": "olla", "target": 12.0, "burn": 20.0},
+	"spaghetti": {"name": "Spaghetti", "kind": "cook", "where": "olla", "salt": true, "target": 9.0, "burn": 16.0},
+	"noquis": {"name": "Ñoquis", "kind": "cook", "where": "olla", "salt": true, "target": 5.0, "burn": 10.0},
+	"ravioles": {"name": "Ravioles", "kind": "cook", "where": "olla", "salt": true, "target": 7.0, "burn": 13.0},
+	"arroz": {"name": "Arroz", "kind": "cook", "where": "olla", "salt": true, "target": 12.0, "burn": 20.0},
 	# Las carnes llevan termómetro: "temps" = curva [segundos, °C] y la temperatura de cada punto
 	"milanesa": {"name": "Milanesa", "kind": "cook", "where": "freidora", "target": 8.0, "burn": 14.0,
 		"temps": [[0, 5], [8, 72], [14, 95]], "target_temp": 72},
-	"bife": {"name": "Bife", "kind": "cook", "where": "plancha", "target": 9.0, "burn": 16.0,
+	"bife": {"name": "Bife", "kind": "cook", "where": "plancha", "salt": true, "target": 9.0, "burn": 16.0,
 		"doneness": {"Jugoso": 6.0, "A punto": 9.0, "Bien cocido": 12.0},
 		"temps": [[0, 5], [6, 52], [9, 60], [12, 71], [16, 90]],
 		"doneness_temp": {"Jugoso": 52, "A punto": 60, "Bien cocido": 71}},
-	"pollo": {"name": "Pollo", "kind": "cook", "where": "plancha", "target": 11.0, "burn": 17.0,
+	"pollo": {"name": "Pollo", "kind": "cook", "where": "plancha", "salt": true, "target": 11.0, "burn": 17.0,
 		"temps": [[0, 5], [11, 74], [17, 95]], "target_temp": 74},
-	"hamburguesa": {"name": "Hamburguesa", "kind": "cook", "where": "plancha", "target": 7.0, "burn": 14.0,
+	"hamburguesa": {"name": "Hamburguesa", "kind": "cook", "where": "plancha", "salt": true, "target": 7.0, "burn": 14.0,
 		"doneness": {"A punto": 7.0, "Bien cocida": 10.0},
 		"temps": [[0, 5], [7, 63], [10, 71], [14, 90]],
 		"doneness_temp": {"A punto": 63, "Bien cocida": 71}},
@@ -140,4 +156,17 @@ const LEVELS := [
 		"interval": [10.0, 15.0], "patience": 75.0, "max_toppings": 2, "show_zone": false},
 	{"name": "Día 6 · Lleno total", "new": ["panqueques"], "customers": 10,
 		"interval": [8.0, 13.0], "patience": 70.0, "max_toppings": 3, "show_zone": false},
+	# Desde el Día 7 cada pedido viene con bebida: se sirve desde la heladera del emplatado
+	{"name": "Día 7 · Con bebida", "new": [], "customers": 10, "drinks": true,
+		"interval": [9.0, 14.0], "patience": 72.0, "max_toppings": 3, "show_zone": false},
 ]
+
+# Bebidas de la heladera del emplatado (desde el Día 7). kind: lata o botella.
+const DRINKS := {
+	"Agua": {"color": Color("8fd3f4"), "label": Color("2f6f9f"), "kind": "botella"},
+	"Cola": {"color": Color("4a1e10"), "label": Color("c8281e"), "kind": "lata"},
+	"Lima-limón": {"color": Color("9fd36a"), "label": Color("2f8a3a"), "kind": "lata"},
+	"Naranja": {"color": Color("f39a1e"), "label": Color("ffffff"), "kind": "botella"},
+	"Pomelo": {"color": Color("f2a3a8"), "label": Color("d9475a"), "kind": "lata"},
+	"Limonada": {"color": Color("f3e27a"), "label": Color("4f9a48"), "kind": "botella"},
+}

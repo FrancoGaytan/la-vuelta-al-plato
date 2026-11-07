@@ -82,6 +82,8 @@ const ONE_SHOTS := {
 	"enojo2": ["res://assets/sfx/enojo2.wav", -21.0],
 	"timbre": ["res://assets/sfx/timbre.wav", -13.0],     # algo llegó a su punto (mejora)
 	"birome": ["res://assets/sfx/birome.wav", -15.0],     # la moza anota el pedido
+	"persiana": ["res://assets/sfx/persiana.wav", -17.0], # sube la persiana al abrir el día
+	"salero": ["res://assets/sfx/salero.wav", -20.0],     # sacudir el salero
 	"corte1": ["res://assets/sfx/corte1.wav", -16.0],     # cuchillo en la tabla (sutil)
 	"corte2": ["res://assets/sfx/corte2.wav", -16.0],
 	"corte3": ["res://assets/sfx/corte3.wav", -16.0],
@@ -97,6 +99,10 @@ var sprinkle_timer := 0.0
 var sprinkle_cursor: Control = null
 var plating_plate = null         # el PlateView del emplatado (para saber dónde está el plato)
 var recipe_panel: Control = null
+var kitchen_views: Array = []        # aparatos dibujados en la cocina (para saber dónde está el salero)
+var salting := false
+var salt_cursor: Control = null
+var salt_sound_t := 0.0
 var pending_order: Dictionary = {}   # pedido que la moza está anotando
 var pending_timer := 0.0
 var waiter_look: Dictionary = {}
@@ -315,7 +321,7 @@ func _quit_from_pause() -> void:
 
 func _update_pause_button() -> void:
 	if pause_button != null:
-		pause_button.text = "▶ Seguir" if paused else "⏸ Pausa"
+		pause_button.text = "Seguir" if paused else "Pausa"
 
 
 func _toggle_sfx() -> void:
@@ -338,7 +344,7 @@ func _toggle_music() -> void:
 
 func _update_music_button() -> void:
 	if music_button != null:
-		music_button.text = "♪ Música: sí" if music_on else "♪ Música: no"
+		music_button.text = "Música: sí" if music_on else "Música: no"
 	if sfx_button != null:
 		sfx_button.text = "Sonidos: sí" if sfx_on else "Sonidos: no"
 
@@ -350,7 +356,10 @@ func _process(delta: float) -> void:
 		return
 	if paused:
 		return
+	if _update_day_intro(delta):
+		return
 	_update_sprinkle(delta)
+	_update_salting(delta)
 	elapsed += delta
 
 	if spawned < level["customers"]:
@@ -528,7 +537,7 @@ func _shop_card(id: String, next_level: int) -> Control:
 	d.custom_minimum_size = Vector2(160, 0)
 	info.add_child(d)
 	if _has(id):
-		info.add_child(_label("✓ Comprado", 14, Color("2f7a3a")))
+		info.add_child(_label("Comprado", 14, Color("2f7a3a")))
 	else:
 		var b := _button("Comprar $%d" % up["price"], _buy.bind(id, next_level), 14)
 		b.disabled = savings < up["price"]
@@ -584,6 +593,11 @@ func _show_menu() -> void:
 	playing = false
 	paused = false
 	_end_sprinkle()
+	_end_salting()
+	intro_t = -1.0
+	if intro_view != null and is_instance_valid(intro_view):
+		intro_view.queue_free()
+	intro_view = null
 	_update_pause_button()
 	_close_overlay()
 	var bg := Control.new()
@@ -617,7 +631,7 @@ func _show_menu() -> void:
 		var lv: Dictionary = Data.LEVELS[i]
 		var txt: String = lv["name"]
 		if best_scores.has(i):
-			txt += "   ·   %d%%  %s" % [int(best_scores[i]), _stars_icons(best_scores[i])]
+			txt += "   ·   %d%%  ·  %d de 3 estrellas" % [int(best_scores[i]), _stars(best_scores[i])]
 		elif i > unlocked_level:
 			txt += "   (bloqueado)"
 		var b := _button(txt, _show_intro.bind(i), 19)
@@ -643,6 +657,20 @@ func _show_intro(i: int) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	box.add_child(row)
+	if lv.get("drinks", false):
+		# Día con bebidas: se muestran las de la heladera
+		for n in Data.DRINKS:
+			var dcol := VBoxContainer.new()
+			row.add_child(dcol)
+			var dpic := PropButton.new()
+			dpic.custom_minimum_size = Vector2(70, 76)
+			dpic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			var dn: String = n
+			dpic.draw_fn = func(ci, rr): Art.draw_drink(ci, rr, dn, Data.DRINKS)
+			dcol.add_child(dpic)
+			var dl := _label(n, 13, COL_INK)
+			dl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			dcol.add_child(dl)
 	for r in lv["new"]:
 		var rec: Dictionary = Data.RECIPES[r]
 		var col := VBoxContainer.new()
@@ -659,11 +687,13 @@ func _show_intro(i: int) -> void:
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		col.add_child(l)
 	var tip := "La barra de cocción marca en verde el punto ideal: sacá la comida cuando la barra esté adentro."
-	if not lv["show_zone"]:
+	if lv.get("drinks", false):
+		tip = "Cada pedido viene con bebida: arrastrala desde la heladera del emplatado (abajo a la derecha) hasta el plato."
+	elif not lv["show_zone"]:
 		tip = "Desde hoy la barra NO marca el punto: mirá el reloj, el termómetro de las carnes y el recetario (tecla R)."
 	if i == 0:
 		tip = "Cómo se juega:\n1. Pedidos: tomá el pedido del cliente del mostrador.\n" + \
-			"2. Cocina: arrastrá los ingredientes de la heladera al aparato y sacalos en su punto (click). Las carnes tienen termómetro.\n" + \
+			"2. Cocina: arrastrá los ingredientes de la heladera al aparato y sacalos en su punto (click). Las carnes tienen termómetro. Lo de la plancha y la olla se sala con el salero.\n" + \
 			"3. Tabla: arrastrá la verdura hasta la tabla y cortala (click en la tabla o barra espaciadora).\n" + \
 			"4. Emplatado: arrastrá al plato lo de la bandeja y la salsa. Los toppings se desparraman: mantené el bowl apretado sobre la comida.\n" + \
 			"5. Entrega: tocá la campanita para servir.\n" + \
@@ -721,6 +751,62 @@ func _start_level(i: int) -> void:
 	playing = true
 	_update_pause_button()
 	_refresh_all()
+	_start_day_intro()
+
+
+# =====================================================================
+# Intro del día: sube la persiana, el cartel pasa a ABIERTO y aparece el nombre del día
+# =====================================================================
+
+const INTRO_LEN := 3.2
+var intro_t := -1.0          # -1 = sin intro
+var intro_view: Control = null
+var intro_bell := false
+
+
+func _start_day_intro() -> void:
+	intro_t = 0.0
+	intro_bell = false
+	var title: String = level["name"]
+	var sub := "Clientes de hoy: %d  ·  ¡A cocinar!" % level["customers"]
+	if level.get("drinks", false):
+		sub = "Hoy los pedidos vienen con bebida"
+	var p := Painter.new()
+	p.position = Vector2.ZERO
+	p.size = Vector2(1280, 720)
+	p.animate = true
+	p.z_index = 50
+	p.mouse_filter = Control.MOUSE_FILTER_STOP
+	p.fn = func(ci, time): Art.draw_day_intro(ci, Rect2(0, 0, 1280, 720), intro_t / INTRO_LEN, title, sub, time)
+	p.gui_input.connect(_on_intro_input)
+	add_child(p)
+	intro_view = p
+	_play_sfx("persiana")
+
+
+func _on_intro_input(event: InputEvent) -> void:
+	var mb := event as InputEventMouseButton
+	if mb != null and mb.pressed and intro_t < INTRO_LEN - 0.35:
+		intro_t = INTRO_LEN - 0.35      # salta al final y se desvanece
+
+
+## Avanza la intro. Devuelve true mientras dure (el día no arranca hasta que termina).
+func _update_day_intro(delta: float) -> bool:
+	if intro_t < 0.0:
+		return false
+	intro_t += delta
+	if not intro_bell and intro_t / INTRO_LEN > 0.6:
+		intro_bell = true
+		_play_sfx("campanita")
+	if intro_view != null and is_instance_valid(intro_view):
+		intro_view.modulate.a = clampf((INTRO_LEN - intro_t) / 0.35, 0.0, 1.0)
+	if intro_t >= INTRO_LEN:
+		intro_t = -1.0
+		if intro_view != null and is_instance_valid(intro_view):
+			intro_view.queue_free()
+		intro_view = null
+		return false
+	return true
 
 
 func _finish_level() -> void:
@@ -739,7 +825,11 @@ func _finish_level() -> void:
 	var box := _open_overlay()
 	box.add_child(_label("¡Cerró el local!", 40, COL_INK))
 	box.add_child(_label(level["name"], 20, COL_INK))
-	box.add_child(_label(_stars_icons(avg), 44, Color("e0a020")))
+	var n_stars := _stars(avg)
+	var stars_pic := Painter.new()
+	stars_pic.custom_minimum_size = Vector2(200, 52)
+	stars_pic.fn = func(ci, _t): Art.stars(ci, Vector2(60, 26), 20, n_stars)
+	box.add_child(stars_pic)
 	box.add_child(_label("Platos servidos: %d" % served + ("   ·   Se fueron sin comer: %d" % lost if lost > 0 else ""), 20, COL_INK))
 	box.add_child(_label("Calificación promedio: %d%%" % int(avg), 20, COL_INK))
 	box.add_child(_label("Recaudado hoy: $%d   ·   Ahorros: $%d" % [money, savings], 20, COL_INK))
@@ -770,9 +860,6 @@ func _stars(score: float) -> int:
 	return 0
 
 
-func _stars_icons(score: float) -> String:
-	var n := _stars(score)
-	return "★".repeat(n) + "☆".repeat(3 - n)
 
 
 # =====================================================================
@@ -892,6 +979,8 @@ func _make_order(c: Dictionary) -> Dictionary:
 		"plate_sauce": "",
 		"plate_toppings": [],  # toppings completos (desparramados lo suficiente)
 		"sprinkles": {},       # cómo quedaron desparramados: {nombre: {amount, pts}}
+		"drink": _pick(Data.DRINKS.keys()) if level.get("drinks", false) else "",
+		"plate_drink": "",
 	}
 	return order
 
@@ -935,7 +1024,7 @@ func _take_off(appliance: String, idx: int) -> void:
 	if t >= slot["burn"]:
 		label = "%s quemado" % Data.ITEMS[slot["item"]]["name"]
 	prepared.append({"item": slot["item"], "t": t, "vtarget": slot["target"], "burn": slot["burn"],
-		"label": label, "pantry": false, "chopped": false})
+		"label": label, "pantry": false, "chopped": false, "salt": slot.get("salt", 0.0)})
 	_refresh_all()
 
 
@@ -1018,6 +1107,11 @@ func _on_plate_drop(data: Dictionary) -> void:
 		"prepared": _plate_ready(data["index"])
 		"pantry": _plate_pantry(data["item"])
 		"sauce": _set_plate_sauce(data["name"])
+		"drink":
+			var o = _get_order(selected_id)
+			if o != null:
+				o["plate_drink"] = data["name"]
+				_refresh_all()
 
 
 func _on_condiment_click(_kind: String, _name: String) -> void:
@@ -1070,6 +1164,70 @@ func _set_plate_sauce(s: String) -> void:
 	if o != null:
 		o["plate_sauce"] = s
 		_refresh_all()
+
+
+# --- Salero ---
+
+func _start_salting() -> void:
+	if paused or salting:
+		return
+	salting = true
+	salt_sound_t = 0.0
+	var cursor := Painter.new()
+	cursor.animate = true
+	cursor.size = Vector2(1, 1)
+	cursor.z_index = 100
+	cursor.fn = func(ci, time):
+		var over := _salt_target() != []
+		var shake := sin(time * 28.0) * 0.25 if over else 0.0
+		Art.salt_shaker(ci, Vector2(10, -34), 1.3, PI + 0.5 + shake, over, time)
+		if not over:
+			Art.text(ci, Vector2(-90, 30), "Sacudilo encima de la plancha o la olla", 13, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 200, 4)
+	add_child(cursor)
+	salt_cursor = cursor
+	salt_cursor.position = get_global_mouse_position()
+
+
+## [aparato, lugar] que está debajo del salero (solo plancha y olla), o [] si no hay nada
+func _salt_target() -> Array:
+	for av in kitchen_views:
+		if not is_instance_valid(av) or not av.kind in ["plancha", "olla"]:
+			continue
+		var i: int = av.slot_under_mouse()
+		if i >= 0:
+			return [av.kind, i]
+	return []
+
+
+func _update_salting(delta: float) -> void:
+	if not salting:
+		return
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or current_station != 1:
+		_end_salting()
+		return
+	salt_cursor.position = get_global_mouse_position()
+	var target := _salt_target()
+	if target.is_empty():
+		return
+	var s = cookers[target[0]][target[1]]
+	if s == null:
+		return
+	s["salt"] = s.get("salt", 0.0) + delta / Data.SALT_TIME
+	var pts: Array = s.get("salt_pts", [])
+	if pts.size() < 40:
+		pts.append(Vector2(rng.randf_range(-0.7, 0.7), rng.randf_range(-0.6, 0.6)))
+	s["salt_pts"] = pts
+	salt_sound_t -= delta
+	if salt_sound_t <= 0.0:
+		salt_sound_t = 0.42
+		_play_sfx("salero")
+
+
+func _end_salting() -> void:
+	salting = false
+	if salt_cursor != null and is_instance_valid(salt_cursor):
+		salt_cursor.queue_free()
+	salt_cursor = null
 
 
 ## Saca un topping del plato (click en su bowl cuando ya está puesto)
@@ -1209,6 +1367,7 @@ func _reset_plate() -> void:
 	o["plate_sauce"] = ""
 	o["plate_toppings"] = []
 	o["sprinkles"] = {}
+	o["plate_drink"] = ""
 	_refresh_all()
 
 
@@ -1245,10 +1404,13 @@ func _on_trash_drop(data: Dictionary) -> void:
 			if o["plate_sauce"] != "":
 				cost += Data.WASTE_COST["condiment"]
 			cost += o["sprinkles"].size() * Data.WASTE_COST["condiment"]
+			if o.get("plate_drink", "") != "":
+				cost += Data.WASTE_COST["ready"]
 			o["plate"] = []
 			o["plate_sauce"] = ""
 			o["plate_toppings"] = []
 			o["sprinkles"] = {}
+			o["plate_drink"] = ""
 	money -= cost
 	_refresh_all()
 	if cost > 0:
@@ -1277,6 +1439,7 @@ func _deliver() -> void:
 				var q := 100.0
 				if e.get("t", -1.0) >= 0.0:
 					q = _cook_quality(e["t"], _target_for(o, e["item"]), e["burn"])
+					q *= Data.salt_factor(e["item"], e.get("salt", 0.0))   # bien salado (o sin sal si no lleva)
 				qualities.append(q)
 				leftovers.remove_at(k)
 				break
@@ -1307,7 +1470,14 @@ func _deliver() -> void:
 	var s_wait := clampf(100.0 - maxf(0.0, wait - patience) * 1.0, 0.0, 100.0)
 
 	var total := s_items * 0.3 + s_cook * 0.3 + s_sauce * 0.1 + s_tops * 0.1 + s_wait * 0.2
+	var s_drink := -1.0
+	if o.get("drink", "") != "":
+		# Con bebida: pesa un 10% y el resto se reparte en proporción
+		s_drink = 100.0 if o.get("plate_drink", "") == o["drink"] else 0.0
+		total = total * 0.9 + s_drink * 0.1
 	var tip := int(round(total / 10.0))
+	if s_drink >= 100.0:
+		tip += 3
 	if _has("caramelera"):
 		tip += 1
 	if _has("vajilla"):
@@ -1397,7 +1567,7 @@ func _build_ui() -> void:
 	music_button.position = Vector2(700, 5)
 	music_button.tooltip_text = "Prender o apagar la música (tecla M)"
 	add_child(music_button)
-	pause_button = _button("⏸ Pausa", _toggle_pause, 14)
+	pause_button = _button("Pausa", _toggle_pause, 14)
 	pause_button.position = Vector2(450, 5)
 	pause_button.tooltip_text = "Pausar el día (P o Esc)"
 	add_child(pause_button)
@@ -1551,6 +1721,8 @@ func _ticket_text(o) -> String:
 	var tops: Array = o["toppings"]
 	if not tops.is_empty():
 		lines.append("+ " + ", ".join(PackedStringArray(tops)))
+	if o.get("drink", "") != "":
+		lines.append("Bebida: " + o["drink"])
 	return "\n".join(PackedStringArray(lines))
 
 
@@ -1584,6 +1756,7 @@ func _item_progress(o, item_id: String) -> String:
 func _refresh_station() -> void:
 	_clear(station_box)
 	customer_views.clear()
+	kitchen_views.clear()
 	plating_plate = null
 	take_button = null
 	board_view = null
@@ -1733,6 +1906,7 @@ func _build_kitchen_station() -> void:
 		av.slot_clicked.connect(_on_slot_clicked.bind(a))
 		av.ingredient_dropped.connect(_on_ingredient_to_appliance.bind(a))
 		station_box.add_child(av)
+		kitchen_views.append(av)
 		x += 236.0 * k + 10.0
 
 	var book_btn := _button("Recetario general (R)", _toggle_recipes, 13)
@@ -1742,7 +1916,15 @@ func _build_kitchen_station() -> void:
 
 	# Abajo de los aparatos: la receta del ticket elegido
 	var top := 36.0 + 330.0 * k + 6.0
-	_build_order_recipe(o, Rect2(12, top, x - 18.0, STATION_SIZE.y - top - 4.0))
+	_build_order_recipe(o, Rect2(12, top, x - 110.0, STATION_SIZE.y - top - 4.0))
+	# Salero: se mantiene apretado y se sacude encima de la plancha o la olla
+	var shaker := _prop(Rect2(x - 94.0, top, 84.0, STATION_SIZE.y - top - 4.0))
+	shaker.draw_fn = func(ci, r): Art.salt_shaker(ci, r.get_center() + Vector2(0, 4), minf(r.size.y / 50.0, 1.6), -0.2, false, 0.0)
+	shaker.text = "Salero"
+	shaker.text_size = 12
+	shaker.mouse_default_cursor_shape = Control.CURSOR_DRAG
+	shaker.tooltip_text = "Mantené apretado y sacudilo encima de lo que está en la plancha o la olla"
+	shaker.held.connect(_start_salting)
 
 	# Heladera con los ingredientes crudos: se arrastran hasta el aparato que corresponde
 	var fx := x + 4.0
@@ -1770,6 +1952,29 @@ func _build_kitchen_station() -> void:
 		b.drag_data = {"kind": "raw", "item": id}
 		b.pressed.connect(_drag_hint.bind(id))
 	recipe_panel = null
+
+
+## Heladera de bebidas del emplatado: se arrastra la bebida hasta el plato
+func _build_drinks_fridge(o, rect: Rect2) -> void:
+	var draw_fridge := func(ci, _t):
+		Art.rrect(ci, Rect2(Vector2.ZERO, rect.size), Color("dfe5ea"), 8, Color("9aa3ab"), 3)
+		Art.rrect(ci, Rect2(6, 22, rect.size.x - 12, rect.size.y - 28), Color("eaf4f8"), 5)
+		Art.text(ci, Vector2(0, 16), "BEBIDAS", 12, Color("4a5560"), HORIZONTAL_ALIGNMENT_CENTER, rect.size.x)
+		for r in 3:
+			ci.draw_rect(Rect2(6, 22 + (r + 1) * 86 - 3, rect.size.x - 12, 3), Color("c5ccd2"))
+		ci.draw_rect(Rect2(6, 22, rect.size.x - 12, rect.size.y - 28), Color(0.7, 0.85, 1.0, 0.12))
+	_painter(rect, draw_fridge, false)
+	var names: Array = Data.DRINKS.keys()
+	for k in names.size():
+		var n: String = names[k]
+		var b := _prop(Rect2(rect.position.x + 6 + (k % 2) * 57, rect.position.y + 24 + (k / 2) * 86, 57, 82))
+		b.draw_fn = func(ci, rr): Art.draw_drink(ci, rr, n, Data.DRINKS)
+		b.text = n
+		b.text_size = 9
+		b.selected = o.get("plate_drink", "") == n
+		b.drag_data = {"kind": "drink", "name": n}
+		b.tooltip_text = "Arrastrá %s hasta el plato" % n.to_lower()
+		b.pressed.connect(_hint.bind("Arrastrá la bebida hasta el plato"))
 
 
 ## Receta del pedido elegido: un paso por ingrediente (dónde va, a qué punto y cómo viene) y lo del emplatado.
@@ -1818,6 +2023,8 @@ func _build_order_recipe(o, rect: Rect2) -> void:
 	var tops: Array = o["toppings"]
 	if not tops.is_empty():
 		fin.append("Toppings: " + ", ".join(PackedStringArray(tops)))
+	if o.get("drink", "") != "":
+		fin.append("Bebida: " + o["drink"])
 	if not fin.is_empty():
 		var step := VBoxContainer.new()
 		step.add_theme_constant_override("separation", 0)
@@ -1858,6 +2065,10 @@ func _recipe_step(n: int, o, entry: Dictionary, compact: bool) -> Control:
 				how = "%s · sacar a %d°C" % [where, temp]
 			else:
 				how = "%s · %d segundos" % [where, int(_target_for(o, id))]
+			if info.get("salt", false):
+				how += " · con sal"
+			elif info["where"] in ["plancha", "olla"]:
+				how += " · ¡sin sal!"
 		"chop":
 			var cuts: int = info["cuts"]
 			if _has("procesadora"):
@@ -1997,13 +2208,15 @@ func _build_plating_station() -> void:
 			b.pressed.connect(_plate_pantry.bind(pantry[k]))
 
 	# Centro: el plato (recibe lo que se arrastra)
+	var drinks: bool = o.get("drink", "") != ""
 	var plate := PlateView.new()
-	plate.position = Vector2(410, 36)
-	plate.size = Vector2(420, 384)
+	plate.position = Vector2(396 if drinks else 410, 36)
+	plate.size = Vector2(400 if drinks else 420, 384)
 	plate.items = o["plate"]
 	plate.sauce = o["plate_sauce"]
 	plate.toppings = o["plate_toppings"]
 	plate.sprinkles = o["sprinkles"]
+	plate.drink = o.get("plate_drink", "")
 	plate.gold = _has("vajilla")
 	plate.seed = o["id"]
 	plate.accept_drops = true
@@ -2011,19 +2224,21 @@ func _build_plating_station() -> void:
 	station_box.add_child(plate)
 	plating_plate = plate
 	var reset := _button("Rehacer plato", _reset_plate, 15)
-	reset.position = Vector2(556, 424)
+	reset.position = Vector2(540 if drinks else 556, 424)
 	reset.tooltip_text = "Devuelve lo del plato a la bandeja. Para tirar el plato, arrastralo al cesto."
 	station_box.add_child(reset)
 
-	# Abajo a la derecha: el cesto de basura
+	# Cesto de basura: abajo a la derecha (en los días con bebida sube, y abajo va la heladera)
 	var trash := TrashView.new()
-	trash.position = Vector2(1188, 344)
+	trash.position = Vector2(1170, 40) if drinks else Vector2(1188, 344)
 	trash.size = Vector2(84, 118)
 	trash.dropped.connect(_on_trash_drop)
 	station_box.add_child(trash)
+	if drinks:
+		_build_drinks_fridge(o, Rect2(1146, 176, 126, 286))
 
 	# Derecha: salsas y toppings del mismo tipo de plato
-	var x0 := 846.0
+	var x0 := 806.0 if drinks else 846.0
 	var y := 42.0
 	var sauces := _cat_options(r["cat"], "sauces")
 	if not sauces.is_empty():
@@ -2086,7 +2301,7 @@ func _build_delivery_station() -> void:
 			Art.draw_character(ci, res["look"], Vector2(52, 112), 0.85, mood, t, true)
 			Art.text(ci, Vector2(96, 76), res["name"], 16, COL_INK)
 			Art.text(ci, Vector2(96, 104), "%d%%" % int(res["total"]), 28, COL_INK)
-			Art.text(ci, Vector2(170, 104), _stars_icons(res["total"]), 18, Color("e0a020"))
+			Art.stars(ci, Vector2(200, 97), 9, _stars(res["total"]))
 			Art.text(ci, Vector2(14, 140), "\"%s\"" % res["verdict"], 17, COL_INK)
 			var lines: Array = res["lines"]
 			for k in lines.size():
@@ -2117,6 +2332,7 @@ func _build_delivery_station() -> void:
 	plate.toppings = o["plate_toppings"]
 	plate.sprinkles = o["sprinkles"]
 	plate.gold = _has("vajilla")
+	plate.drink = o.get("plate_drink", "")
 	plate.seed = o["id"]
 	station_box.add_child(plate)
 
@@ -2141,11 +2357,13 @@ func _order_text(o) -> String:
 		lines.append("· " + (o["sauce"] if o["sauce"] != "" else "sin salsa"))
 	for t in o["toppings"]:
 		lines.append("+ " + t)
+	if o.get("drink", "") != "":
+		lines.append("Bebida: " + o["drink"])
 	return "\n".join(PackedStringArray(lines))
 
 
 func _plate_text(o) -> String:
-	if o["plate"].is_empty() and o["plate_toppings"].is_empty() and o["plate_sauce"] == "":
+	if o["plate"].is_empty() and o["plate_toppings"].is_empty() and o["plate_sauce"] == "" and o.get("plate_drink", "") == "":
 		return "(vacío)"
 	var lines := []
 	for e in o["plate"]:
@@ -2153,6 +2371,8 @@ func _plate_text(o) -> String:
 	lines.append("· " + (o["plate_sauce"] if o["plate_sauce"] != "" else "sin salsa"))
 	for t in o["plate_toppings"]:
 		lines.append("+ " + t)
+	if o.get("plate_drink", "") != "":
+		lines.append("Bebida: " + o["plate_drink"])
 	return "\n".join(PackedStringArray(lines))
 
 
