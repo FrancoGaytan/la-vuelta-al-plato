@@ -161,6 +161,44 @@ const LEVELS := [
 		"interval": [9.0, 14.0], "patience": 72.0, "max_toppings": 3, "show_zone": false},
 ]
 
+# =====================================================================
+# Modo historia: cada país es un "paquete" con su ciudad, su cocina, sus días y su forma de cocinar.
+# Solo gana plata el local donde jugás; lo ganado va a los ahorros, que sirven para abrir países nuevos.
+# lon/lat ubican la ciudad en el mapamundi. ready = false: la cocina de ese país todavía se está armando.
+# flag: [tipo, colores]: "h" franjas horizontales, "v" verticales, "circulo" (Japón), "barras" (EE.UU.)
+# =====================================================================
+const COUNTRIES := {
+	"argentina": {"name": "Argentina", "city": "Buenos Aires", "restaurant": "Viandas", "lon": -58.4, "lat": -34.6,
+		"flag": ["h", [Color("74acdf"), Color("ffffff"), Color("74acdf")]],
+		"cuisine": "Milanesas, bifes, pastas caseras y ensaladas",
+		"cooking": "Plancha, olla, freidora y horno", "price": 0, "stars_needed": 0, "ready": true, "levels": LEVELS},
+	"mexico": {"name": "México", "city": "Ciudad de México", "restaurant": "La Comalera", "lon": -99.1, "lat": 19.4,
+		"flag": ["v", [Color("006847"), Color("ffffff"), Color("ce1126")]],
+		"cuisine": "Tacos, quesadillas y salsas", "cooking": "Comal para tortillas y molcajete para moler",
+		"price": 900, "stars_needed": 2, "ready": false, "levels": []},
+	"eeuu": {"name": "Estados Unidos", "city": "Nueva York", "restaurant": "Big Apple Diner", "lon": -74.0, "lat": 40.7,
+		"flag": ["barras", [Color("b22234"), Color("ffffff"), Color("3c3b6e")]],
+		"cuisine": "Hamburguesas, hot dogs y malteadas", "cooking": "Armado por capas a contrarreloj",
+		"price": 1200, "stars_needed": 3, "ready": false, "levels": []},
+	"italia": {"name": "Italia", "city": "Roma", "restaurant": "Trattoria del Forno", "lon": 12.5, "lat": 41.9,
+		"flag": ["v", [Color("009246"), Color("ffffff"), Color("ce2b37")]],
+		"cuisine": "Pizza al horno de leña, pasta fresca y tiramisú", "cooking": "Horno de leña con pala y pasta amasada a mano",
+		"price": 600, "stars_needed": 1, "ready": false, "levels": []},
+	"francia": {"name": "Francia", "city": "París", "restaurant": "Le Petit Crêpier", "lon": 2.35, "lat": 48.85, "label_left": true,
+		"flag": ["v", [Color("0055a4"), Color("ffffff"), Color("ef4135")]],
+		"cuisine": "Crêpes, croissants y pastelería", "cooking": "Sartén de crêpes y decoración con manga",
+		"price": 1500, "stars_needed": 4, "ready": false, "levels": []},
+	"india": {"name": "India", "city": "Mumbai", "restaurant": "Masala Express", "lon": 72.8, "lat": 19.0,
+		"flag": ["h", [Color("ff9933"), Color("ffffff"), Color("138808")]],
+		"cuisine": "Curry, naan y lassi", "cooking": "Especias en orden y horno tandoor",
+		"price": 1800, "stars_needed": 5, "ready": false, "levels": []},
+	"japon": {"name": "Japón", "city": "Tokio", "restaurant": "Sakura Ramen", "lon": 139.7, "lat": 35.7,
+		"flag": ["circulo", [Color("ffffff"), Color("bc002d")]],
+		"cuisine": "Sushi, ramen y yakisoba", "cooking": "Esterilla de sushi y wok",
+		"price": 2200, "stars_needed": 6, "ready": false, "levels": []},
+}
+const COUNTRY_ORDER := ["argentina", "italia", "mexico", "eeuu", "francia", "india", "japon"]
+
 # Bebidas de la heladera del emplatado (desde el Día 7). kind: lata o botella.
 const DRINKS := {
 	"Agua": {"color": Color("8fd3f4"), "label": Color("2f6f9f"), "kind": "botella"},

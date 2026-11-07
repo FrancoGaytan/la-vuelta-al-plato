@@ -12,6 +12,7 @@ const ApplianceView = preload("res://views/appliance_view.gd")
 const BoardView = preload("res://views/board_view.gd")
 const PlateView = preload("res://views/plate_view.gd")
 const TrashView = preload("res://views/trash_view.gd")
+const WorldMap = preload("res://views/world_map.gd")
 
 const STATIONS := ["Pedidos", "Cocina", "Tabla", "Emplatado", "Entrega"]
 const TAB_ICONS := ["kitchen/notepad", "kitchen/pot", "kitchen/board", "kitchen/plate", "kitchen/bell"]
@@ -36,6 +37,10 @@ var rng := RandomNumberGenerator.new()
 var unlocked_level := 0
 var best_scores := {}
 var savings := 0             # ahorros: lo ganado en los días, para gastar en la tienda
+var country_progress := {}   # por país: {desbloqueado, mejores, estrellas}
+var owned_countries: Array = ["argentina"]
+var current_country := "argentina"
+var world_map = null
 var owned: Array = []        # mejoras compradas
 
 # --- Estado del día ---
@@ -132,7 +137,7 @@ func _ready() -> void:
 	_load_progress()
 	_build_ui()
 	_setup_music()
-	_show_menu()
+	_show_title()
 
 
 # =====================================================================
@@ -434,33 +439,81 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _load_progress() -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(save_path) == OK:
-		unlocked_level = cfg.get_value("progreso", "desbloqueado", 0)
-		best_scores = cfg.get_value("progreso", "mejores", {})
+	var err := cfg.load(save_path)
+	if err != OK and save_path == SAVE_PATH:
+		# El juego antes se llamaba "Viandas": si hay una partida guardada con ese nombre, se trae
+		var old := OS.get_data_dir().path_join("Godot/app_userdata/Viandas/progreso.cfg")
+		if FileAccess.file_exists(old):
+			err = cfg.load(old)
+	if err == OK:
 		savings = cfg.get_value("progreso", "ahorros", 0)
 		owned = cfg.get_value("progreso", "mejoras_compradas", [])
 		music_on = cfg.get_value("opciones", "musica", true)
 		sfx_on = cfg.get_value("opciones", "sonidos", true)
+		country_progress = cfg.get_value("paises", "progreso", {})
+		owned_countries = cfg.get_value("paises", "locales", ["argentina"])
+		current_country = cfg.get_value("paises", "actual", "argentina")
+		if country_progress.is_empty():
+			# Partidas viejas (antes del modo historia): lo jugado pasa al local de Buenos Aires
+			country_progress["argentina"] = {"desbloqueado": cfg.get_value("progreso", "desbloqueado", 0),
+				"mejores": cfg.get_value("progreso", "mejores", {})}
+	if not Data.COUNTRIES.has(current_country) or not Data.COUNTRIES[current_country]["ready"]:
+		current_country = "argentina"
+	_use_country(current_country)
 
 
 func _save_progress() -> void:
+	_store_country()
 	var cfg := ConfigFile.new()
-	cfg.set_value("progreso", "desbloqueado", unlocked_level)
-	cfg.set_value("progreso", "mejores", best_scores)
 	cfg.set_value("progreso", "ahorros", savings)
 	cfg.set_value("progreso", "mejoras_compradas", owned)
+	cfg.set_value("paises", "progreso", country_progress)
+	cfg.set_value("paises", "locales", owned_countries)
+	cfg.set_value("paises", "actual", current_country)
 	cfg.set_value("opciones", "musica", music_on)
 	cfg.set_value("opciones", "sonidos", sfx_on)
 	cfg.save(save_path)
 
 
 func _reset_progress() -> void:
-	unlocked_level = 0
-	best_scores = {}
 	savings = 0
 	owned = []
+	country_progress = {}
+	owned_countries = ["argentina"]
+	current_country = "argentina"
+	_use_country(current_country)
 	_save_progress()
-	_show_menu()
+	_show_title()
+
+
+## Cambia al local de un país: los días desbloqueados y récords son de cada local
+func _use_country(id: String) -> void:
+	current_country = id
+	var p: Dictionary = country_progress.get(id, {})
+	unlocked_level = p.get("desbloqueado", 0)
+	best_scores = p.get("mejores", {})
+
+
+func _store_country() -> void:
+	var p: Dictionary = country_progress.get(current_country, {})
+	p["desbloqueado"] = unlocked_level
+	p["mejores"] = best_scores
+	country_progress[current_country] = p
+
+
+func _levels() -> Array:
+	return Data.COUNTRIES[current_country]["levels"]
+
+
+## Reputación de un local: promedio de los mejores puntajes de sus días
+func _reputation(id: String) -> int:
+	var best: Dictionary = best_scores if id == current_country else country_progress.get(id, {}).get("mejores", {})
+	if best.is_empty():
+		return 0
+	var sum := 0.0
+	for k in best:
+		sum += best[k]
+	return int(sum / best.size())
 
 
 func _has(upgrade: String) -> bool:
@@ -624,11 +677,12 @@ func _show_menu() -> void:
 	card.position = Vector2(470, 40)
 	bg.add_child(card)
 	var box: VBoxContainer = card.get_child(0)
-	box.add_child(_label("VIANDAS", 54, COL_INK))
-	box.add_child(_label("Atendé, cociná en su punto, emplatá y serví.", 17, COL_INK))
-	box.add_child(_spacer(4))
-	for i in Data.LEVELS.size():
-		var lv: Dictionary = Data.LEVELS[i]
+	var cdata: Dictionary = Data.COUNTRIES[current_country]
+	box.add_child(_label(cdata["restaurant"], 46, COL_INK))
+	box.add_child(_label("%s, %s  ·  reputación %d%%" % [cdata["city"], cdata["name"], _reputation(current_country)], 17, COL_INK))
+	box.add_child(_spacer(2))
+	for i in _levels().size():
+		var lv: Dictionary = _levels()[i]
 		var txt: String = lv["name"]
 		if best_scores.has(i):
 			txt += "   ·   %d%%  ·  %d de 3 estrellas" % [int(best_scores[i]), _stars(best_scores[i])]
@@ -641,15 +695,181 @@ func _show_menu() -> void:
 	box.add_child(_spacer(4))
 	var bottom := HBoxContainer.new()
 	box.add_child(bottom)
+	bottom.add_theme_constant_override("separation", 8)
 	var shop := _button("Tienda  ·  ahorros $%d" % savings, _show_shop.bind(-1), 17)
 	shop.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bottom.add_child(shop)
+	bottom.add_child(_button("Volver al mapa", _show_map, 17))
+
+
+# =====================================================================
+# Pantalla de título y mapamundi
+# =====================================================================
+
+func _stop_everything() -> void:
+	playing = false
+	paused = false
+	_end_sprinkle()
+	_end_salting()
+	intro_t = -1.0
+	if intro_view != null and is_instance_valid(intro_view):
+		intro_view.queue_free()
+	intro_view = null
+	_update_pause_button()
+	_close_overlay()
+
+
+func _show_title() -> void:
+	_stop_everything()
+	var bg := Control.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
+	overlay = bg
+	# De fondo, el mapamundi moviéndose solo
+	var wm := WorldMap.new()
+	wm.size = Vector2(1280, 720)
+	wm.owned = owned_countries
+	wm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.add_child(wm)
+	var drift := func(ci, t):
+		wm.cam = Vector2(fmod(t * 25.0, WorldMap.MW - 1280.0 / wm.zoom), 260.0 + sin(t * 0.2) * 80.0)
+		ci.draw_rect(Rect2(0, 0, 1280, 720), Color(0.1, 0.07, 0.05, 0.45))
+		Art.draw_lighting(ci, Rect2(0, 0, 1280, 720))
+	_painter(Rect2(0, 0, 1280, 720), drift, true, bg)
+	var logo := func(ci, t): Art.draw_logo(ci, Vector2(640, 300), 1.25 + sin(t * 1.5) * 0.015, t)
+	_painter(Rect2(0, 0, 1280, 720), logo, true, bg)
+	var sub := _label("Un viaje de cocina por el mundo", 22, Color("fdf6e3"), 5)
+	sub.position = Vector2(0, 492)
+	sub.size = Vector2(1280, 30)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bg.add_child(sub)
+	var play := _button("Jugar", _show_map, 28)
+	play.custom_minimum_size = Vector2(260, 64)
+	play.position = Vector2(510, 540)
+	bg.add_child(play)
 	var reset := _button("Borrar progreso", _reset_progress, 13)
-	bottom.add_child(reset)
+	reset.position = Vector2(1130, 676)
+	bg.add_child(reset)
+
+
+func _show_map() -> void:
+	_stop_everything()
+	var bg := Control.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
+	overlay = bg
+	var wm := WorldMap.new()
+	wm.size = Vector2(1280, 720)
+	wm.home = current_country
+	wm.owned = owned_countries
+	for id in Data.COUNTRY_ORDER:
+		wm.info[id] = {"stars": country_progress.get(id, {}).get("estrellas", 0), "rep": _reputation(id)}
+	wm.city_selected.connect(_on_city_selected)
+	bg.add_child(wm)
+	world_map = wm
+	# Barra de arriba: logo chico, ahorros, estrellas y volver
+	var bar := func(ci, t):
+		Art.rrect(ci, Rect2(10, 8, 1260, 58), Color(0.12, 0.09, 0.07, 0.82), 12)
+		Art.draw_logo(ci, Vector2(50, 37), 0.2, t)
+		Art.text(ci, Vector2(90, 46), "La Vuelta al Plato", 26, Color("fdf6e3"))
+		Art.text(ci, Vector2(0, 46), "Ahorros: $%d" % savings, 22, Color("ffe08a"), HORIZONTAL_ALIGNMENT_RIGHT, 1080)
+		Art.text(ci, Vector2(380, 46), "Arrastrá el mapa para moverte · tocá una ciudad para viajar", 15, Color(1, 1, 1, 0.75))
+	_painter(Rect2(0, 0, 1280, 80), bar, true, bg)
+	var back := _button("Título", _show_title, 15)
+	back.position = Vector2(1170, 22)
+	bg.add_child(back)
+	var zin := _button("+", func(): wm.zoom_at(Vector2(640, 380), 1.2), 22)
+	zin.position = Vector2(1214, 560)
+	zin.custom_minimum_size = Vector2(48, 48)
+	bg.add_child(zin)
+	var zout := _button("-", func(): wm.zoom_at(Vector2(640, 380), 1.0 / 1.2), 22)
+	zout.position = Vector2(1214, 616)
+	zout.custom_minimum_size = Vector2(48, 48)
+	bg.add_child(zout)
+	_show_city_card(current_country)
+
+
+func _on_city_selected(id: String) -> void:
+	if Data.COUNTRIES[id]["ready"] and id in owned_countries:
+		_store_country()
+		_use_country(id)
+		_save_progress()
+	_show_city_card(id)
+
+
+## Ficha de la ciudad elegida en el mapa
+func _show_city_card(id: String) -> void:
+	if overlay == null:
+		return
+	var old := overlay.get_node_or_null("Ficha")
+	if old != null:
+		old.queue_free()
+	var c: Dictionary = Data.COUNTRIES[id]
+	var card := _paper_card(Vector2(340, 0))
+	card.name = "Ficha"
+	card.position = Vector2(20, 90)
+	overlay.add_child(card)
+	var box: VBoxContainer = card.get_child(0)
+	box.add_theme_constant_override("separation", 6)
+	var flag := Painter.new()
+	flag.custom_minimum_size = Vector2(290, 40)
+	flag.fn = func(ci, t): Art.draw_flag(ci, Rect2(0, 4, 48, 32), c["flag"], t)
+	box.add_child(flag)
+	box.add_child(_label(c["restaurant"], 28, COL_INK))
+	box.add_child(_label("%s, %s" % [c["city"], c["name"]], 17, Color("2f5d50")))
+	var cu := _label("Cocina: " + c["cuisine"], 14, COL_INK)
+	cu.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cu.custom_minimum_size = Vector2(290, 0)
+	box.add_child(cu)
+	var co := _label("Cómo se cocina: " + c["cooking"], 14, COL_INK)
+	co.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	co.custom_minimum_size = Vector2(290, 0)
+	box.add_child(co)
+	if id in owned_countries:
+		box.add_child(_label("Reputación: %d%%" % _reputation(id), 16, COL_INK))
+		var st: int = country_progress.get(id, {}).get("estrellas", 0)
+		var sp := Painter.new()
+		sp.custom_minimum_size = Vector2(290, 30)
+		sp.fn = func(ci, _t):
+			Art.stars(ci, Vector2(30, 15), 12, st)
+			Art.text(ci, Vector2(70, 21), "Estrellas de la guía", 13, Color(0.35, 0.28, 0.2))
+		box.add_child(sp)
+		if c["ready"]:
+			var go := _button("Entrar al local", _show_menu, 22)
+			go.custom_minimum_size = Vector2(290, 54)
+			box.add_child(go)
+	else:
+		var req := _label("Abrir un local: $%d y %d %s" % [c["price"], c["stars_needed"], "estrella" if c["stars_needed"] == 1 else "estrellas"], 15, COL_INK)
+		box.add_child(req)
+		if not c["ready"]:
+			var soon := _label("Próximamente: esta cocina todavía se está construyendo.", 14, Color("c8463c"))
+			soon.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			soon.custom_minimum_size = Vector2(290, 0)
+			box.add_child(soon)
+		var buy := _button("Comprar local ($%d)" % c["price"], _buy_country.bind(id), 18)
+		buy.disabled = not c["ready"] or savings < c["price"] or _total_stars() < c["stars_needed"]
+		box.add_child(buy)
+
+
+func _total_stars() -> int:
+	var n := 0
+	for id in country_progress:
+		n += country_progress[id].get("estrellas", 0)
+	return n
+
+
+func _buy_country(id: String) -> void:
+	var c: Dictionary = Data.COUNTRIES[id]
+	if id in owned_countries or not c["ready"] or savings < c["price"] or _total_stars() < c["stars_needed"]:
+		return
+	savings -= c["price"]
+	owned_countries.append(id)
+	_play_sfx("caja")
+	_on_city_selected(id)
 
 
 func _show_intro(i: int) -> void:
-	var lv: Dictionary = Data.LEVELS[i]
+	var lv: Dictionary = _levels()[i]
 	var box := _open_overlay()
 	box.add_theme_constant_override("separation", 6)
 	box.add_child(_label(lv["name"], 32, COL_INK))
@@ -717,10 +937,10 @@ func _show_intro(i: int) -> void:
 
 func _start_level(i: int) -> void:
 	level_idx = i
-	level = Data.LEVELS[i]
+	level = _levels()[i]
 	recipes = []
 	for j in i + 1:
-		for r in Data.LEVELS[j]["new"]:
+		for r in _levels()[j]["new"]:
 			recipes.append(r)
 	elapsed = 0.0
 	spawn_timer = 1.0
@@ -814,7 +1034,7 @@ func _finish_level() -> void:
 	_play_sfx("puerta")
 	var avg := score_sum / (served + lost) if served + lost > 0 else 0.0   # los que se fueron cuentan como 0
 	var passed := avg >= Data.PASS_SCORE
-	var has_next := level_idx + 1 < Data.LEVELS.size()
+	var has_next := level_idx + 1 < _levels().size()
 	if passed and has_next and level_idx + 1 > unlocked_level:
 		unlocked_level = level_idx + 1
 	if not best_scores.has(level_idx) or avg > best_scores[level_idx]:

@@ -1,6 +1,6 @@
-# Viandas
+# La Vuelta al Plato
 
-Juego de cocina en 2D hecho con **Godot 4**. Los clientes entran al local, hacen su pedido y vos cocinás en la cocina: medís los tiempos y temperaturas, cortás, emplatás y servís antes de que se cansen de esperar.
+Juego de cocina en 2D hecho con **Godot 4**: un viaje de cocina por el mundo. Empezás en **Viandas**, tu local de Buenos Aires: los clientes hacen su pedido y vos cocinás, medís tiempos y temperaturas, salás, cortás, emplatás y servís antes de que se cansen de esperar. Con lo que ganás, abrís locales en otros países, cada uno con su gastronomía y su forma de cocinar (mapamundi del modo historia).
 
 **Jugalo en el navegador:** https://francogaytan.github.io/viandas/
 

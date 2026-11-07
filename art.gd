@@ -767,6 +767,145 @@ static func plant(ci: CanvasItem, base: Vector2) -> void:
 	ci.draw_rect(Rect2(base + Vector2(-29, -18), Vector2(58, 9)), Color("a8522c"))
 
 
+## Texto curvado sobre un arco (letra por letra). angle = centro del texto (radianes, -PI/2 = arriba).
+static func arc_text(ci: CanvasItem, c: Vector2, radius: float, s: String, fsize: int, color: Color, angle: float,
+		outline := 0, outline_color := Color(0, 0, 0, 0.6), inside := false) -> void:
+	var font := ThemeDB.fallback_font
+	var widths := []
+	var total := 0.0
+	for ch in s:
+		var w := font.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize).x
+		widths.append(w)
+		total += w
+	var span := total / radius
+	var a := angle - span / 2.0 if not inside else angle + span / 2.0
+	for k in s.length():
+		var w: float = widths[k]
+		var step := w / radius
+		var mid := a + (step / 2.0 if not inside else -step / 2.0)
+		var p := c + Vector2.from_angle(mid) * radius
+		var rot := mid + PI / 2.0 if not inside else mid - PI / 2.0
+		ci.draw_set_transform(p, rot, Vector2.ONE)
+		if outline > 0:
+			ci.draw_string_outline(font, Vector2(-w / 2.0, fsize * 0.35), s[k], HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, outline, outline_color)
+		ci.draw_string(font, Vector2(-w / 2.0, fsize * 0.35), s[k], HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, color)
+		a += step if not inside else -step
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Logo de "La Vuelta al Plato": un plato-globo terráqueo que gira, con gorro de chef,
+## cubiertos cruzados, vapor y una cinta con el nombre en curva.
+static func draw_logo(ci: CanvasItem, c: Vector2, s: float, time: float) -> void:
+	# Cubiertos cruzados detrás del plato
+	for side in [-1, 1]:
+		ci.draw_set_transform(c, side * 0.55, Vector2.ONE)
+		var steel := Color("dfe5ea")
+		rrect(ci, Rect2(Vector2(-7, 40) * s, Vector2(14, 120) * s), Color("6e4527"), 6 * s)
+		if side < 0:
+			# Tenedor
+			rrect(ci, Rect2(Vector2(-14, -150) * s, Vector2(28, 40) * s), steel, 6 * s)
+			for k in 4:
+				rrect(ci, Rect2(Vector2(-14 + k * 8, -196) * s, Vector2(5, 52) * s), steel, 2 * s)
+			ci.draw_rect(Rect2(Vector2(-4, -112) * s, Vector2(8, 154) * s), steel)
+		else:
+			# Cuchillo
+			ci.draw_colored_polygon(PackedVector2Array([Vector2(-6, -196) * s, Vector2(10, -170) * s, Vector2(10, 40) * s,
+				Vector2(-6, 40) * s]), steel)
+			ci.draw_line(Vector2(-2, -180) * s, Vector2(-2, 30) * s, Color(1, 1, 1, 0.8), 2 * s)
+		ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Plato
+	var r := 118.0 * s
+	ci.draw_circle(c + Vector2(4, 8) * s, r, Color(0, 0, 0, 0.3))
+	ci.draw_circle(c, r, Color("dfe5ea"))
+	ci.draw_circle(c, r * 0.96, Color("fbfcfd"))
+	ci.draw_arc(c, r * 0.9, 0, TAU, 64, Color("2f6f8f"), 3 * s)
+	# Globo terráqueo que gira dentro del plato
+	var g := r * 0.74
+	ci.draw_circle(c, g, Color("3f8fbf"))
+	ci.draw_circle(c + Vector2(-g * 0.25, -g * 0.25), g * 0.7, Color(1, 1, 1, 0.08))
+	var spin := fmod(time * 0.08, 1.0)
+	var blobs := [[0.0, -0.35, 0.32, 0.2], [0.18, 0.15, 0.22, 0.35], [0.45, -0.25, 0.4, 0.22], [0.62, 0.3, 0.16, 0.2],
+		[0.78, -0.1, 0.24, 0.3], [0.9, 0.45, 0.2, 0.12]]
+	for b in blobs:
+		var u: float = fmod(b[0] + spin, 1.0) * 2.0 - 1.0     # -1..1 de izquierda a derecha
+		if absf(u) > 0.95:
+			continue
+		var squash := sqrt(maxf(0.0, 1.0 - u * u))         # se achican hacia los bordes (efecto esfera)
+		var pos := c + Vector2(u * g * 0.85, b[1] * g)
+		ellipse(ci, pos, Vector2(b[2] * g * squash, b[3] * g), Color("8fcf6a"))
+		ellipse(ci, pos + Vector2(-2, -2) * s, Vector2(b[2] * g * squash * 0.6, b[3] * g * 0.5), Color("a9df82"))
+	for m in 3:
+		var u2: float = fmod(m / 3.0 + spin, 1.0) * 2.0 - 1.0
+		ci.draw_arc(c + Vector2(u2 * g * 0.0, 0), g, 0, TAU, 48, Color(1, 1, 1, 0.0), 1)
+		var rx := absf(g * (1.0 - absf(u2)))
+		if rx > 2.0:
+			var pts := PackedVector2Array()
+			for k in 25:
+				var a := -PI / 2.0 + PI * k / 24.0
+				pts.append(c + Vector2(cos(a) * rx * signf(u2 + 0.0001), sin(a) * g))
+			ci.draw_polyline(pts, Color(1, 1, 1, 0.25), 1.5 * s, true)
+	ci.draw_line(c + Vector2(-g, 0), c + Vector2(g, 0), Color(1, 1, 1, 0.25), 1.5 * s)
+	ci.draw_arc(c, g, 0, TAU, 64, Color("2a6a92"), 3 * s)
+	ci.draw_arc(c, g * 0.98, PI * 1.05, PI * 1.5, 16, Color(1, 1, 1, 0.5), 3 * s)
+	# Vapor que sale del plato
+	for k in 3:
+		var ph := fmod(time * 0.5 + k / 3.0, 1.0)
+		var sx := c.x + (k - 1) * 40 * s + sin(ph * 6.0 + k) * 8 * s
+		ci.draw_arc(Vector2(sx, c.y - r - 20 * s - ph * 50 * s), 10 * s, PI * 0.5, PI * 1.5, 10, Color(1, 1, 1, 0.6 * (1.0 - ph)), 4 * s)
+	# Gorro de chef ladeado sobre el globo
+	ci.draw_set_transform(c + Vector2(30, -g - 6 * s), 0.25, Vector2.ONE)
+	var hat := Color("fbfbf8")
+	rrect(ci, Rect2(Vector2(-42, -6) * s, Vector2(84, 22) * s), hat, 4 * s, Color("d8d8d0"), 1)
+	ci.draw_circle(Vector2(-26, -26) * s, 26 * s, hat)
+	ci.draw_circle(Vector2(26, -26) * s, 26 * s, hat)
+	ci.draw_circle(Vector2(0, -40) * s, 30 * s, hat)
+	ci.draw_arc(Vector2(0, -40) * s, 30 * s, PI * 1.1, PI * 1.6, 10, Color("e6e6de"), 3 * s)
+	ci.draw_line(Vector2(-14, -2) * s, Vector2(-14, 14) * s, Color("e6e6de"), 2 * s)
+	ci.draw_line(Vector2(14, -2) * s, Vector2(14, 14) * s, Color("e6e6de"), 2 * s)
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Cinta roja con el nombre, en curva
+	var rib_r := r * 1.18
+	var a0 := PI * 0.18
+	var a1 := PI * 0.82
+	var band := PackedVector2Array()
+	for k in 33:
+		var a := a0 + (a1 - a0) * k / 32.0
+		band.append(c + Vector2.from_angle(a) * (rib_r + 24 * s))
+	for k in range(32, -1, -1):
+		var a := a0 + (a1 - a0) * k / 32.0
+		band.append(c + Vector2.from_angle(a) * (rib_r - 24 * s))
+	for side in [a0, a1]:
+		var p: Vector2 = c + Vector2.from_angle(side) * rib_r
+		var out := Vector2.from_angle(side + (-0.25 if side == a0 else 0.25))
+		var tail := p + Vector2(-46 * s if side == a1 else 46 * s, 14 * s)
+		ci.draw_colored_polygon(PackedVector2Array([p - out * 24 * s, tail - Vector2(0, 22 * s), tail + Vector2(-12 * s if side == a1 else 12 * s, 0), tail + Vector2(0, 22 * s), p + out * 24 * s]), Color("9a2a20"))
+	ci.draw_colored_polygon(band, Color("c8463c"))
+	ci.draw_polyline(band, Color("8a2018"), 2 * s, true)
+	arc_text(ci, c, rib_r - 9 * s, "LA VUELTA AL PLATO", int(30 * s), Color("fdf6e3"), PI / 2.0, int(3 * s), Color("6a1a12"), true)
+
+
+## Bandera simplificada que flamea. flag = [tipo, colores] (ver Data.COUNTRIES)
+static func draw_flag(ci: CanvasItem, r: Rect2, flag: Array, t: float) -> void:
+	var kind: String = flag[0]
+	var cols: Array = flag[1]
+	r.position.y += sin(t * 5.0) * 1.0
+	match kind:
+		"h":
+			for s in cols.size():
+				ci.draw_rect(Rect2(r.position.x, r.position.y + r.size.y * s / cols.size(), r.size.x, r.size.y / cols.size()), cols[s])
+		"v":
+			for s in cols.size():
+				ci.draw_rect(Rect2(r.position.x + r.size.x * s / cols.size(), r.position.y, r.size.x / cols.size(), r.size.y), cols[s])
+		"circulo":
+			ci.draw_rect(r, cols[0])
+			ci.draw_circle(r.get_center(), r.size.y * 0.3, cols[1])
+		"barras":
+			for s in 5:
+				ci.draw_rect(Rect2(r.position.x, r.position.y + r.size.y * s / 5.0, r.size.x, r.size.y / 5.0), cols[s % 2])
+			ci.draw_rect(Rect2(r.position, r.size * Vector2(0.45, 0.55)), cols[2])
+	ci.draw_rect(r, Color(0, 0, 0, 0.35), false, 1.0)
+
+
 ## Estrella de 5 puntas (dibujada: en la web no hay fuente con el símbolo ★)
 static func star(ci: CanvasItem, c: Vector2, r: float, filled: bool) -> void:
 	var pts := PackedVector2Array()
