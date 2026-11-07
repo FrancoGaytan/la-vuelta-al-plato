@@ -1,0 +1,8 @@
+# Cache e importaciones de Godot (se regeneran solas)
+.godot/
+*.import
+*.uid
+/android/
+# Compilaciones
+build/
+*.tmp

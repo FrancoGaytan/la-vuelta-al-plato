@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<g transform="translate(42 46)"><circle r="30" fill="#5b2a6e"/><circle r="25" fill="#f8f2dc"/><g fill="#cfc08a"><circle cx="-8" cy="-6" r="2"/><circle cx="6" cy="-9" r="2"/><circle cx="10" cy="5" r="2"/><circle cx="-4" cy="9" r="2"/><circle cx="-12" cy="4" r="1.8"/><circle cx="1" cy="0" r="1.8"/></g></g>
+<g transform="translate(86 52)"><circle r="28" fill="#4e235f"/><circle r="23" fill="#f6efd6"/><g fill="#cfc08a"><circle cx="-7" cy="-5" r="2"/><circle cx="6" cy="-8" r="2"/><circle cx="9" cy="5" r="2"/><circle cx="-3" cy="8" r="2"/><circle cx="0" cy="0" r="1.8"/></g></g>
+<g transform="translate(62 92)"><circle r="29" fill="#5b2a6e"/><circle r="24" fill="#f9f3de"/><g fill="#cfc08a"><circle cx="-8" cy="-6" r="2"/><circle cx="7" cy="-8" r="2"/><circle cx="10" cy="6" r="2"/><circle cx="-5" cy="9" r="2"/><circle cx="1" cy="1" r="1.8"/></g></g>
+<g fill="#ffffff" opacity="0.35"><ellipse cx="30" cy="34" rx="8" ry="4" transform="rotate(-30 30 34)"/><ellipse cx="76" cy="40" rx="7" ry="3.5" transform="rotate(-30 76 40)"/></g>
+</svg>

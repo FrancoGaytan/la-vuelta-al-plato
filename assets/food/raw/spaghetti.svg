@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fbedbd"/><stop offset="1" stop-color="#e3c47a"/></linearGradient></defs>
+<g transform="rotate(-32 64 64)">
+<rect x="14" y="50" width="100" height="28" rx="4" fill="#000000" opacity="0.12" transform="translate(2 4)"/>
+<g fill="url(#s)" stroke="#cfa95a" stroke-width="0.7">
+<rect x="14" y="50" width="100" height="3" rx="1.5"/><rect x="12" y="53" width="104" height="3" rx="1.5"/><rect x="16" y="56" width="98" height="3" rx="1.5"/>
+<rect x="10" y="59" width="106" height="3" rx="1.5"/><rect x="14" y="62" width="102" height="3" rx="1.5"/><rect x="12" y="65" width="100" height="3" rx="1.5"/>
+<rect x="16" y="68" width="98" height="3" rx="1.5"/><rect x="13" y="71" width="103" height="3" rx="1.5"/><rect x="15" y="74" width="97" height="3" rx="1.5"/>
+</g>
+<rect x="56" y="46" width="16" height="36" rx="3" fill="#2f6f8f"/>
+<rect x="56" y="46" width="16" height="6" rx="3" fill="#4a90b4"/>
+<text x="64" y="70" font-size="9" font-family="sans-serif" fill="#ffffff" text-anchor="middle" transform="rotate(90 64 64)">PASTA</text>
+</g>
+</svg>

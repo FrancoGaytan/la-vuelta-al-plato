@@ -1,0 +1,2323 @@
+extends Control
+## Viandas — juego de cocina por estaciones.
+## Flujo: Pedidos -> Cocina (medir tiempos) -> Tabla (cortar) -> Emplatado -> Entrega (puntaje).
+## Datos en data.gd · Arte en art.gd y assets/ · Piezas visuales en views/.
+
+const Data = preload("res://data.gd")
+const Art = preload("res://art.gd")
+const Painter = preload("res://views/painter.gd")
+const PropButton = preload("res://views/prop_button.gd")
+const CustomerView = preload("res://views/customer_view.gd")
+const ApplianceView = preload("res://views/appliance_view.gd")
+const BoardView = preload("res://views/board_view.gd")
+const PlateView = preload("res://views/plate_view.gd")
+const TrashView = preload("res://views/trash_view.gd")
+
+const STATIONS := ["Pedidos", "Cocina", "Tabla", "Emplatado", "Entrega"]
+const TAB_ICONS := ["kitchen/notepad", "kitchen/pot", "kitchen/board", "kitchen/plate", "kitchen/bell"]
+const NAMES := ["Marta", "Rulo", "Doña Elsa", "Tano", "Vicky", "Pocho", "Lula", "Beto", "Chela", "Nacho",
+	"Cachi", "Mirta", "Gonza", "Rocío", "Don Aldo", "Flor"]
+const MAX_ACTIVE := 6
+const SAVE_PATH := "user://progreso.cfg"
+var save_path := SAVE_PATH   # las pruebas automáticas usan otro archivo para no tocar tu progreso
+const DOOR_X := 105.0
+const WAITER_X := 790.0      # dónde está parada la moza del mostrador
+const WALK_SPEED := 240.0
+const STATION_SIZE := Vector2(1280, 466)
+
+const COL_BG := Color("2b2420")
+const COL_PAPER := Color("fdf6e3")
+const COL_SELECTED := Color("ffd166")
+const COL_INK := Color("3b2414")
+
+var rng := RandomNumberGenerator.new()
+
+# --- Progreso guardado ---
+var unlocked_level := 0
+var best_scores := {}
+var savings := 0             # ahorros: lo ganado en los días, para gastar en la tienda
+var owned: Array = []        # mejoras compradas
+
+# --- Estado del día ---
+var level_idx := 0
+var level: Dictionary = {}
+var recipes: Array = []      # recetas habilitadas en este día
+var playing := false
+var elapsed := 0.0
+var spawn_timer := 0.0
+var spawned := 0
+var served := 0
+var lost := 0                # clientes que se fueron sin comer
+var score_sum := 0.0
+var money := 0
+var next_id := 1
+var queue: Array = []        # clientes en el mostrador: {name, arrived, look, x}
+var walkers: Array = []      # clientes que ya pidieron y se van a sentar: {look, x, bubble}
+var orders: Array = []       # pedidos tomados (ver _take_order)
+var cookers := {}            # aparato -> Array de null o {item, t, target, burn}
+var board = null             # tabla: null o {item, cuts, need}
+var prepared: Array = []     # bandeja compartida: lo cocinado/cortado sirve para cualquier plato
+var music_on := true
+var music: AudioStreamPlayer
+var music_button: Button
+var sfx_on := true
+var sfx_button: Button
+var cook_players := {}       # "aparato:lugar" -> AudioStreamPlayer (un sonido por cada cosa cocinándose)
+var cook_streams := {}
+
+# Sonido de cada aparato: archivo y volumen base (dB) de cada cosa que se cocina
+const COOK_SFX := {
+	"olla": ["res://assets/sfx/hervor.wav", -17.0],
+	"plancha": ["res://assets/sfx/chisporroteo.wav", -16.0],
+	"freidora": ["res://assets/sfx/freidora.wav", -16.0],
+	"horno": ["res://assets/sfx/horno.wav", -21.0],
+}
+
+# Sonidos sueltos: archivo y volumen (dB)
+const ONE_SHOTS := {
+	"caja": ["res://assets/sfx/caja.wav", -15.0],          # el cliente paga
+	"campanita": ["res://assets/sfx/campanita.wav", -13.0], # entra un cliente
+	"puerta": ["res://assets/sfx/puerta.wav", -18.0],       # cierra el local
+	"enojo": ["res://assets/sfx/enojo.wav", -21.0],        # un cliente se empieza a enojar (sutil)
+	"enojo2": ["res://assets/sfx/enojo2.wav", -21.0],
+	"timbre": ["res://assets/sfx/timbre.wav", -13.0],     # algo llegó a su punto (mejora)
+	"birome": ["res://assets/sfx/birome.wav", -15.0],     # la moza anota el pedido
+	"corte1": ["res://assets/sfx/corte1.wav", -16.0],     # cuchillo en la tabla (sutil)
+	"corte2": ["res://assets/sfx/corte2.wav", -16.0],
+	"corte3": ["res://assets/sfx/corte3.wav", -16.0],
+}
+var one_shot_streams := {}
+var hint_label: Label = null
+var paused := false
+var pause_button: Button
+# Desparramar toppings: se mantiene apretado el bowl y se pasa por arriba de la comida
+var sprinkle_name := ""
+var sprinkle_used := 0.0         # segundos que estuvo desparramando de verdad (sobre la comida)
+var sprinkle_timer := 0.0
+var sprinkle_cursor: Control = null
+var plating_plate = null         # el PlateView del emplatado (para saber dónde está el plato)
+var recipe_panel: Control = null
+var pending_order: Dictionary = {}   # pedido que la moza está anotando
+var pending_timer := 0.0
+var waiter_look: Dictionary = {}
+var selected_id := -1
+var current_station := 0
+var last_result := {}
+
+# --- UI ---
+var lbl_level: Label
+var lbl_customers: Label
+var lbl_money: Label
+var ticket_rail: HBoxContainer
+var station_box: Control
+var tab_buttons: Array = []
+var ticket_labels := {}
+var ticket_heads := {}
+var customer_views: Array = []   # {src, v, queued}
+var take_button: Control = null
+var board_view = null
+var board_info: Label = null
+var overlay: Control = null
+
+
+func _ready() -> void:
+	rng.randomize()
+	theme = _make_theme()
+	_load_progress()
+	_build_ui()
+	_setup_music()
+	_show_menu()
+
+
+# =====================================================================
+# Música
+# =====================================================================
+
+func _setup_music() -> void:
+	music = AudioStreamPlayer.new()
+	music.volume_db = -11.0
+	add_child(music)
+	music.stream = _looped("res://assets/music/lounge.wav")
+	if music_on and music.stream != null:
+		music.play()
+	_update_music_button()
+	for a in COOK_SFX:
+		cook_streams[a] = _looped(COOK_SFX[a][0])
+	for s in ONE_SHOTS:
+		if ResourceLoader.exists(ONE_SHOTS[s][0]):
+			one_shot_streams[s] = load(ONE_SHOTS[s][0])
+
+
+func _play_sfx(name: String, extra_db := 0.0) -> void:
+	if not sfx_on or not one_shot_streams.has(name):
+		return
+	var p := AudioStreamPlayer.new()
+	p.stream = one_shot_streams[name]
+	p.volume_db = ONE_SHOTS[name][1] + extra_db
+	p.pitch_scale = rng.randf_range(0.96, 1.04)
+	add_child(p)
+	p.finished.connect(p.queue_free)
+	p.play()
+
+
+## Cuando un cliente pasa a "molesto" o a "enojado" hace un murmullo de fastidio y suelta un comentario
+## (una sola vez por estado). Si espera demasiado, se va.
+func _check_moods() -> void:
+	for c in queue + orders:
+		var wait: float = elapsed - c["arrived"]
+		var m := _mood(wait)
+		var heard: int = c.get("heard", 1)
+		if m >= 2 and heard < m:
+			c["heard"] = m
+			_play_sfx("enojo" if rng.randf() < 0.5 else "enojo2", 0.0 if m == 2 else 2.0)
+			_hint("%s: «%s»" % [c["name"], _wait_line(c, m)])
+	var leave_at := _patience() * Data.LEAVE_FACTOR
+	for c in queue.duplicate():
+		if elapsed - c["arrived"] >= leave_at:
+			_customer_leaves(c, false)
+	for o in orders.duplicate():
+		if elapsed - o["arrived"] >= leave_at:
+			_customer_leaves(o, true)
+
+
+## Frases (cada vez más sarcásticas) de los clientes que esperan
+const WAIT_LINES := [
+	["¡Hola! ¿Me tomás el pedido?", "Buenas, cuando puedan...", "Qué lindo local, ¿no?"],
+	["¿Hoy cocinan o es un museo?", "Tranqui, total no tengo nada que hacer...", "¿Esto es comida rápida o lenta?",
+		"Me están creciendo canas acá", "¿El cocinero fue a buscar la vaca?"],
+	["Tic, tac... tic, tac.", "Si tardan más, vengo con almohada", "¡Ya me hice amigo de la planta!",
+		"Pido el desayuno de mañana también, así ganamos tiempo", "¿Sabían que el pedido era para hoy?",
+		"Bravo, récord mundial de espera"],
+]
+
+
+func _wait_line(c: Dictionary, mood: int) -> String:
+	var lines: Array = WAIT_LINES[clampi(mood - 1, 0, 2)]
+	var sd: int = c.get("look", {}).get("seed", 0)
+	return lines[(int(elapsed / 7.0) + sd) % lines.size()]
+
+
+## Un cliente se cansó de esperar: se va enojado y el pedido se pierde
+func _customer_leaves(c: Dictionary, is_order: bool) -> void:
+	if is_order:
+		for e in c["plate"]:
+			if not e["pantry"]:
+				prepared.append(e)       # lo que ya estaba en el plato vuelve a la bandeja
+		orders.erase(c)
+		if selected_id == c["id"]:
+			selected_id = orders[0]["id"] if not orders.is_empty() else -1
+	else:
+		if not pending_order.is_empty() and not queue.is_empty() and queue[0] == c:
+			pending_order = {}
+		queue.erase(c)
+	lost += 1
+	walkers.append({"look": c["look"], "x": c.get("x", _queue_x(0)) if not is_order else _queue_x(0),
+		"bubble": "¡Me voy! ¡Qué servicio!", "dir": -1, "mood": 3})
+	_play_sfx("enojo2", 3.0)
+	_play_sfx("campanita", -4.0)
+	_hint("%s se cansó de esperar y se fue" % c["name"])
+	_refresh_all()
+
+
+func _looped(path: String) -> AudioStreamWAV:
+	if not ResourceLoader.exists(path):
+		return null
+	var stream: AudioStreamWAV = load(path)
+	stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	stream.loop_begin = 0
+	stream.loop_end = int(stream.get_length() * stream.mix_rate)
+	return stream
+
+
+## Un sonido por cada cosa que se está cocinando: se suman entre sí.
+func _update_cook_audio(delta: float) -> void:
+	var muffle := 0.0 if current_station == 1 else -7.0
+	for a in cookers:
+		for i in cookers[a].size():
+			var key := "%s:%d" % [a, i]
+			var s = cookers[a][i]
+			var p: AudioStreamPlayer = cook_players.get(key)
+			if s != null and playing and sfx_on and cook_streams.get(a) != null:
+				var target: float = COOK_SFX[a][1] + muffle
+				if s["t"] >= s["burn"] - 3.0:
+					target += 3.0     # cuando se está por quemar, se escucha más
+				if p == null:
+					p = AudioStreamPlayer.new()
+					p.stream = cook_streams[a]
+					p.pitch_scale = rng.randf_range(0.92, 1.08)
+					# la plancha y la freidora "chillan" al apoyar la comida; la olla y el horno entran despacio
+					p.volume_db = target + 4.0 if a in ["plancha", "freidora"] else -30.0
+					add_child(p)
+					p.play(rng.randf() * 3.8)
+					cook_players[key] = p
+				p.volume_db = move_toward(p.volume_db, target, 30.0 * delta)
+			elif p != null:
+				p.volume_db = move_toward(p.volume_db, -45.0, 70.0 * delta)
+				if p.volume_db <= -44.0:
+					p.queue_free()
+					cook_players.erase(key)
+
+
+func _stop_cook_audio() -> void:
+	for key in cook_players:
+		cook_players[key].queue_free()
+	cook_players.clear()
+
+
+# =====================================================================
+# Pausa
+# =====================================================================
+
+func _toggle_pause() -> void:
+	if not playing:
+		return
+	if paused:
+		_resume()
+		return
+	paused = true
+	_end_sprinkle()
+	for key in cook_players:
+		cook_players[key].stream_paused = true
+	var box := _open_overlay()
+	box.add_child(_label("Pausa", 44, COL_INK))
+	box.add_child(_label("El local está en pausa: la cocina y los clientes esperan.", 17, COL_INK))
+	box.add_child(_label("(P o Esc para seguir)", 14, Color(0.4, 0.3, 0.2)))
+	var go := _button("Seguir cocinando", _resume, 22)
+	go.custom_minimum_size = Vector2(320, 56)
+	box.add_child(go)
+	box.add_child(_button("Reiniciar el día", _restart_from_pause, 18))
+	box.add_child(_button("Salir al menú", _quit_from_pause, 18))
+	_update_pause_button()
+
+
+func _resume() -> void:
+	paused = false
+	_close_overlay()
+	for key in cook_players:
+		cook_players[key].stream_paused = false
+	_update_pause_button()
+
+
+func _restart_from_pause() -> void:
+	paused = false
+	playing = false
+	_stop_cook_audio()
+	_show_intro(level_idx)
+	_update_pause_button()
+
+
+func _quit_from_pause() -> void:
+	paused = false
+	_stop_cook_audio()
+	_show_menu()
+	_update_pause_button()
+
+
+func _update_pause_button() -> void:
+	if pause_button != null:
+		pause_button.text = "▶ Seguir" if paused else "⏸ Pausa"
+
+
+func _toggle_sfx() -> void:
+	sfx_on = not sfx_on
+	if not sfx_on:
+		_stop_cook_audio()
+	_update_music_button()
+	_save_progress()
+
+
+func _toggle_music() -> void:
+	music_on = not music_on
+	if music_on and music.stream != null:
+		music.play()
+	else:
+		music.stop()
+	_update_music_button()
+	_save_progress()
+
+
+func _update_music_button() -> void:
+	if music_button != null:
+		music_button.text = "♪ Música: sí" if music_on else "♪ Música: no"
+	if sfx_button != null:
+		sfx_button.text = "Sonidos: sí" if sfx_on else "Sonidos: no"
+
+
+func _process(delta: float) -> void:
+	if not playing:
+		if not cook_players.is_empty():
+			_stop_cook_audio()
+		return
+	if paused:
+		return
+	_update_sprinkle(delta)
+	elapsed += delta
+
+	if spawned < level["customers"]:
+		spawn_timer -= delta
+		if spawn_timer <= 0.0 and queue.size() + orders.size() < MAX_ACTIVE:
+			_spawn_customer()
+			var iv: Array = level["interval"]
+			spawn_timer = rng.randf_range(iv[0], iv[1])
+
+	for i in queue.size():
+		queue[i]["x"] = move_toward(queue[i]["x"], _queue_x(i), WALK_SPEED * delta)
+	for wk in walkers:
+		wk["x"] += WALK_SPEED * delta * wk.get("dir", 1)
+	walkers = walkers.filter(func(wk): return wk["x"] < 1400.0 and wk["x"] > DOOR_X - 10.0)
+
+	var auto_off := []
+	for a in cookers:
+		for i in cookers[a].size():
+			var slot = cookers[a][i]
+			if slot == null:
+				continue
+			var before: float = slot["t"]
+			slot["t"] += delta
+			if before < slot["target"] and slot["t"] >= slot["target"]:
+				if _has("timbre"):
+					_play_sfx("timbre")
+				if _has("ayudante"):
+					auto_off.append([a, i])
+	for ai in auto_off:
+		_hint("El ayudante sacó %s en su punto" % Data.ITEMS[cookers[ai[0]][ai[1]]["item"]]["name"].to_lower())
+		_take_off(ai[0], ai[1])
+	_update_cook_audio(delta)
+	_update_pending_order(delta)
+	_check_moods()
+
+	if current_station == 0:
+		_update_customer_views()
+	_update_tabs()
+	_update_hud()
+	_update_ticket_texts()
+
+	if spawned >= level["customers"] and queue.is_empty() and orders.is_empty():
+		_finish_level()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode == KEY_M:
+		_toggle_music()
+		return
+	if not playing:
+		return
+	if key.keycode == KEY_P or key.keycode == KEY_ESCAPE:
+		_toggle_pause()
+		return
+	if paused:
+		return
+	if key.keycode == KEY_R and current_station == 1:
+		_toggle_recipes()
+		return
+	if key.keycode >= KEY_1 and key.keycode <= KEY_5:
+		_go_to_station(key.keycode - KEY_1)
+	elif key.keycode == KEY_SPACE and current_station == 2:
+		_chop()
+
+
+# =====================================================================
+# Niveles y progreso
+# =====================================================================
+
+func _load_progress() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(save_path) == OK:
+		unlocked_level = cfg.get_value("progreso", "desbloqueado", 0)
+		best_scores = cfg.get_value("progreso", "mejores", {})
+		savings = cfg.get_value("progreso", "ahorros", 0)
+		owned = cfg.get_value("progreso", "mejoras_compradas", [])
+		music_on = cfg.get_value("opciones", "musica", true)
+		sfx_on = cfg.get_value("opciones", "sonidos", true)
+
+
+func _save_progress() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("progreso", "desbloqueado", unlocked_level)
+	cfg.set_value("progreso", "mejores", best_scores)
+	cfg.set_value("progreso", "ahorros", savings)
+	cfg.set_value("progreso", "mejoras_compradas", owned)
+	cfg.set_value("opciones", "musica", music_on)
+	cfg.set_value("opciones", "sonidos", sfx_on)
+	cfg.save(save_path)
+
+
+func _reset_progress() -> void:
+	unlocked_level = 0
+	best_scores = {}
+	savings = 0
+	owned = []
+	_save_progress()
+	_show_menu()
+
+
+func _has(upgrade: String) -> bool:
+	return upgrade in owned
+
+
+func _patience() -> float:
+	var p: float = level.get("patience", 60.0)
+	if _has("plantas"):
+		p *= 1.15
+	if _has("ventilador"):
+		p *= 1.25
+	return p
+
+
+# =====================================================================
+# Tienda: mejoras para el local con los ahorros
+# =====================================================================
+
+func _show_shop(next_level := -1) -> void:
+	playing = false
+	var box := _open_overlay()
+	box.add_theme_constant_override("separation", 8)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 20)
+	box.add_child(head)
+	head.add_child(_label("Tienda del local", 34, COL_INK))
+	var cash := _label("Ahorros: $%d" % savings, 24, Color("2f7a3a"))
+	cash.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cash.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	head.add_child(cash)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	box.add_child(grid)
+	for id in Data.UPGRADE_ORDER:
+		grid.add_child(_shop_card(id, next_level))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	box.add_child(row)
+	if next_level >= 0:
+		var go := _button("Seguir al día siguiente", _show_intro.bind(next_level), 20)
+		row.add_child(go)
+	row.add_child(_button("Volver al menú", _show_menu, 18))
+
+
+func _shop_card(id: String, next_level: int) -> Control:
+	var up: Dictionary = Data.UPGRADES[id]
+	var card := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("fff9ea") if not _has(id) else Color("e8f4e0")
+	sb.border_color = Color("c9a86a") if not _has(id) else Color("7ab36a")
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(8)
+	sb.set_content_margin_all(8)
+	card.add_theme_stylebox_override("panel", sb)
+	card.custom_minimum_size = Vector2(250, 0)
+	var col := HBoxContainer.new()
+	col.add_theme_constant_override("separation", 8)
+	card.add_child(col)
+	var pic := PropButton.new()
+	pic.custom_minimum_size = Vector2(64, 64)
+	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pic.draw_fn = func(ci, r): _draw_upgrade_icon(ci, r, id)
+	col.add_child(pic)
+	var info := VBoxContainer.new()
+	info.add_theme_constant_override("separation", 2)
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_child(info)
+	info.add_child(_label("%s  ·  %s" % [up["name"], up["for"]], 14, COL_INK))
+	var d := _label(up["desc"], 12, Color(0.3, 0.24, 0.18))
+	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	d.custom_minimum_size = Vector2(160, 0)
+	info.add_child(d)
+	if _has(id):
+		info.add_child(_label("✓ Comprado", 14, Color("2f7a3a")))
+	else:
+		var b := _button("Comprar $%d" % up["price"], _buy.bind(id, next_level), 14)
+		b.disabled = savings < up["price"]
+		if b.disabled:
+			b.tooltip_text = "Te faltan $%d" % (up["price"] - savings)
+		info.add_child(b)
+	return card
+
+
+func _buy(id: String, next_level: int) -> void:
+	var price: int = Data.UPGRADES[id]["price"]
+	if _has(id) or savings < price:
+		return
+	savings -= price
+	owned.append(id)
+	_save_progress()
+	_play_sfx("caja", -4.0)
+	_show_shop(next_level)
+
+
+func _draw_upgrade_icon(ci: CanvasItem, r: Rect2, id: String) -> void:
+	var c := r.get_center()
+	var s := minf(r.size.x, r.size.y)
+	match id:
+		"plantas":
+			Art.hanging_plant(ci, Vector2(c.x, r.position.y + 2), s / 90.0)
+		"ventilador":
+			Art.ceiling_fan(ci, Vector2(c.x, r.position.y + 6), Time.get_ticks_msec() / 1000.0, s / 110.0)
+		"caramelera":
+			Art.candy_jar(ci, Rect2(c - Vector2(s, s) * 0.4, Vector2(s, s) * 0.8))
+		"vajilla":
+			Art.draw_tex(ci, Art.tex("kitchen/plate"), r)
+			ci.draw_arc(c, s * 0.46, 0, TAU, 40, Color("d9a520"), 3)
+		"timbre":
+			Art.draw_tex(ci, Art.tex("kitchen/bell"), r)
+		"reloj":
+			ci.draw_circle(c, s * 0.42, Color("2b2d31"))
+			ci.draw_circle(c, s * 0.36, Color("fbfbf8"))
+			ci.draw_arc(c, s * 0.3, -PI / 2, 0.3, 12, Color("5ee06a"), 5)
+			ci.draw_line(c, c + Vector2(0, -s * 0.26), Color("2b2d31"), 2)
+			ci.draw_line(c, c + Vector2(s * 0.18, 0), Color("d0281a"), 2)
+		"hornalla":
+			Art.draw_tex(ci, Art.tex("kitchen/pot"), r)
+		"procesadora":
+			Art.rrect(ci, Rect2(c + Vector2(-s * 0.25, s * 0.05), Vector2(s * 0.5, s * 0.36)), Color("d9534a"), 6)
+			Art.rrect(ci, Rect2(c + Vector2(-s * 0.2, -s * 0.38), Vector2(s * 0.4, s * 0.45)), Color(0.85, 0.92, 0.95, 0.8), 6, Color("9aa3ab"), 2)
+			Art.draw_food(ci, "zanahoria", Rect2(c + Vector2(-s * 0.16, -s * 0.32), Vector2(s * 0.32, s * 0.34)), Color.WHITE, true)
+		"ayudante":
+			Art.draw_character(ci, Art.chef_look(), Vector2(c.x, r.end.y), s / 190.0, 0, Time.get_ticks_msec() / 1000.0)
+
+
+func _show_menu() -> void:
+	playing = false
+	paused = false
+	_end_sprinkle()
+	_update_pause_button()
+	_close_overlay()
+	var bg := Control.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
+	overlay = bg
+	var menu_names := ["Pastas", "Carnes", "Vegetales", "Postres", "¡y más!"]
+	var draw_bg := func(ci, t):
+		Art.draw_dining(ci, Rect2(0, 0, 1280, 720), menu_names, t, owned)
+		Art.draw_counter(ci, Rect2(0, 0, 1280, 720), 470)
+	var p := _painter(Rect2(0, 0, 1280, 720), draw_bg, true, bg)
+	p.mouse_filter = Control.MOUSE_FILTER_STOP
+	var light := func(ci, _t): Art.draw_lighting(ci, Rect2(0, 0, 1280, 720))
+	_painter(Rect2(0, 0, 1280, 720), light, false, bg)
+	var chef := CustomerView.new()
+	chef.look = Art.chef_look()
+	chef.scale_factor = 2.3
+	chef.position = Vector2(60, 40)
+	chef.size = Vector2(380, 450)
+	chef.bubble = "¡Bienvenido a la cocina!"
+	bg.add_child(chef)
+
+	var card := _paper_card(Vector2(560, 0))
+	card.position = Vector2(470, 40)
+	bg.add_child(card)
+	var box: VBoxContainer = card.get_child(0)
+	box.add_child(_label("VIANDAS", 54, COL_INK))
+	box.add_child(_label("Atendé, cociná en su punto, emplatá y serví.", 17, COL_INK))
+	box.add_child(_spacer(4))
+	for i in Data.LEVELS.size():
+		var lv: Dictionary = Data.LEVELS[i]
+		var txt: String = lv["name"]
+		if best_scores.has(i):
+			txt += "   ·   %d%%  %s" % [int(best_scores[i]), _stars_icons(best_scores[i])]
+		elif i > unlocked_level:
+			txt += "   (bloqueado)"
+		var b := _button(txt, _show_intro.bind(i), 19)
+		b.custom_minimum_size = Vector2(520, 46)
+		b.disabled = i > unlocked_level
+		box.add_child(b)
+	box.add_child(_spacer(4))
+	var bottom := HBoxContainer.new()
+	box.add_child(bottom)
+	var shop := _button("Tienda  ·  ahorros $%d" % savings, _show_shop.bind(-1), 17)
+	shop.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bottom.add_child(shop)
+	var reset := _button("Borrar progreso", _reset_progress, 13)
+	bottom.add_child(reset)
+
+
+func _show_intro(i: int) -> void:
+	var lv: Dictionary = Data.LEVELS[i]
+	var box := _open_overlay()
+	box.add_theme_constant_override("separation", 6)
+	box.add_child(_label(lv["name"], 32, COL_INK))
+	box.add_child(_label("Clientes del día: %d   ·   Nuevo en el menú:" % lv["customers"], 18, COL_INK))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	box.add_child(row)
+	for r in lv["new"]:
+		var rec: Dictionary = Data.RECIPES[r]
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 0)
+		row.add_child(col)
+		var pic := PropButton.new()
+		pic.custom_minimum_size = Vector2(130, 76)
+		pic.food_id = rec["parts"][0][0]
+		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		col.add_child(pic)
+		var l := _label("%s\n(%s)" % [rec["name"], rec["cat"]], 14, COL_INK)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.custom_minimum_size = Vector2(130, 0)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		col.add_child(l)
+	var tip := "La barra de cocción marca en verde el punto ideal: sacá la comida cuando la barra esté adentro."
+	if not lv["show_zone"]:
+		tip = "Desde hoy la barra NO marca el punto: mirá el reloj, el termómetro de las carnes y el recetario (tecla R)."
+	if i == 0:
+		tip = "Cómo se juega:\n1. Pedidos: tomá el pedido del cliente del mostrador.\n" + \
+			"2. Cocina: arrastrá los ingredientes de la heladera al aparato y sacalos en su punto (click). Las carnes tienen termómetro.\n" + \
+			"3. Tabla: arrastrá la verdura hasta la tabla y cortala (click en la tabla o barra espaciadora).\n" + \
+			"4. Emplatado: arrastrá al plato lo de la bandeja y la salsa. Los toppings se desparraman: mantené el bowl apretado sobre la comida.\n" + \
+			"5. Entrega: tocá la campanita para servir.\n" + \
+			"Click en un ticket para elegir con qué pedido trabajás. Teclas 1 a 5: cambiar de estación.\n\n" + tip
+	var tl := _label(tip, 14, COL_INK)
+	tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tl.custom_minimum_size = Vector2(760, 0)
+	tl.add_theme_constant_override("line_spacing", -2)
+	box.add_child(tl)
+	box.add_child(_label("Necesitás un promedio de %d%% para pasar al día siguiente." % int(Data.PASS_SCORE), 14, COL_INK))
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 12)
+	box.add_child(buttons)
+	var go := _button("¡Abrir el local!", _start_level.bind(i), 22)
+	go.custom_minimum_size = Vector2(280, 56)
+	buttons.add_child(go)
+	var back := _button("Volver", _show_menu, 18)
+	back.custom_minimum_size = Vector2(140, 56)
+	buttons.add_child(back)
+
+
+func _start_level(i: int) -> void:
+	level_idx = i
+	level = Data.LEVELS[i]
+	recipes = []
+	for j in i + 1:
+		for r in Data.LEVELS[j]["new"]:
+			recipes.append(r)
+	elapsed = 0.0
+	spawn_timer = 1.0
+	spawned = 0
+	served = 0
+	lost = 0
+	score_sum = 0.0
+	money = 0
+	next_id = 1
+	queue.clear()
+	walkers.clear()
+	orders.clear()
+	cookers.clear()
+	for a in Data.APPLIANCE_ORDER:
+		var arr := []
+		var n_slots: int = Data.APPLIANCES[a]["slots"] + (1 if a == "olla" and _has("hornalla") else 0)
+		for k in n_slots:
+			arr.append(null)
+		cookers[a] = arr
+	board = null
+	prepared.clear()
+	pending_order = {}
+	selected_id = -1
+	current_station = 0
+	last_result = {}
+	_close_overlay()
+	paused = false
+	playing = true
+	_update_pause_button()
+	_refresh_all()
+
+
+func _finish_level() -> void:
+	playing = false
+	_play_sfx("puerta")
+	var avg := score_sum / (served + lost) if served + lost > 0 else 0.0   # los que se fueron cuentan como 0
+	var passed := avg >= Data.PASS_SCORE
+	var has_next := level_idx + 1 < Data.LEVELS.size()
+	if passed and has_next and level_idx + 1 > unlocked_level:
+		unlocked_level = level_idx + 1
+	if not best_scores.has(level_idx) or avg > best_scores[level_idx]:
+		best_scores[level_idx] = avg
+	savings = maxi(savings + money, 0)    # lo recaudado del día va a los ahorros
+	_save_progress()
+
+	var box := _open_overlay()
+	box.add_child(_label("¡Cerró el local!", 40, COL_INK))
+	box.add_child(_label(level["name"], 20, COL_INK))
+	box.add_child(_label(_stars_icons(avg), 44, Color("e0a020")))
+	box.add_child(_label("Platos servidos: %d" % served + ("   ·   Se fueron sin comer: %d" % lost if lost > 0 else ""), 20, COL_INK))
+	box.add_child(_label("Calificación promedio: %d%%" % int(avg), 20, COL_INK))
+	box.add_child(_label("Recaudado hoy: $%d   ·   Ahorros: $%d" % [money, savings], 20, COL_INK))
+	var msg := "¡Aprobado! Se desbloqueó el día siguiente." if passed else "Te faltó para el %d%%. ¡Probá de nuevo!" % int(Data.PASS_SCORE)
+	if passed and not has_next:
+		msg = "¡Completaste todos los días! Sos el chef del barrio."
+	box.add_child(_label(msg, 18, COL_INK))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	box.add_child(row)
+	var next := level_idx + 1 if passed and has_next else level_idx
+	var shop := _button("Ir a la tienda ($%d)" % savings, _show_shop.bind(next), 20)
+	shop.tooltip_text = "Comprá mejoras para el local con tus ahorros"
+	row.add_child(shop)
+	if passed and has_next:
+		row.add_child(_button("Día siguiente", _show_intro.bind(level_idx + 1), 20))
+	row.add_child(_button("Repetir día", _show_intro.bind(level_idx), 20))
+	row.add_child(_button("Menú", _show_menu, 20))
+
+
+func _stars(score: float) -> int:
+	if score >= 90.0:
+		return 3
+	if score >= 75.0:
+		return 2
+	if score >= Data.PASS_SCORE:
+		return 1
+	return 0
+
+
+func _stars_icons(score: float) -> String:
+	var n := _stars(score)
+	return "★".repeat(n) + "☆".repeat(3 - n)
+
+
+# =====================================================================
+# Pedidos
+# =====================================================================
+
+func _queue_x(i: int) -> float:
+	return 600.0 - i * 112.0
+
+
+func _spawn_customer() -> void:
+	spawned += 1
+	queue.append({"name": _pick(NAMES), "arrived": elapsed, "look": Art.random_look(rng), "x": DOOR_X})
+	_play_sfx("campanita")
+	if current_station == 0:
+		_refresh_station()
+
+
+func _mood(wait: float) -> int:
+	var p := _patience()
+	if wait < p * 0.45:
+		return 0
+	if wait < p:
+		return 1
+	if wait < p * 1.5:
+		return 2
+	return 3
+
+
+## Click en "Tomar pedido": el cliente dice lo que quiere y la moza lo anota con la birome.
+func _begin_take_order() -> void:
+	if queue.is_empty() or not pending_order.is_empty():
+		return
+	pending_order = _make_order(queue[0])
+	pending_timer = 1.5
+	_play_sfx("birome")
+	if current_station == 0:
+		_update_customer_views()
+
+
+func _update_pending_order(delta: float) -> void:
+	if pending_order.is_empty():
+		return
+	pending_timer -= delta
+	if pending_timer <= 0.0:
+		_commit_order(pending_order)
+		pending_order = {}
+
+
+## Lo que dice el cliente al pedir
+func _order_speech(o: Dictionary) -> String:
+	var parts := []
+	for entry in o["items"]:
+		parts.append(_req_text(entry).to_lower())
+	var txt: String = ", ".join(PackedStringArray(parts))
+	if o["sauce"] != "":
+		txt += ", con " + o["sauce"].to_lower()
+	if not o["toppings"].is_empty():
+		txt += " y " + ", ".join(PackedStringArray(o["toppings"])).to_lower()
+	return "Quiero %s" % txt
+
+
+## Tomar el pedido de una (lo usan las pruebas)
+func _take_order() -> void:
+	if queue.is_empty():
+		return
+	_commit_order(_make_order(queue[0]))
+
+
+func _commit_order(order: Dictionary) -> void:
+	if queue.is_empty():
+		return
+	var c = queue.pop_front()
+	next_id = maxi(next_id, order["id"] + 1)
+	orders.append(order)
+	selected_id = order["id"]
+	walkers.append({"look": c["look"], "x": c["x"], "bubble": "¡Gracias!"})
+	_refresh_all()
+
+
+func _make_order(c: Dictionary) -> Dictionary:
+	var rkey: String = _pick(recipes)
+	var r: Dictionary = Data.RECIPES[rkey]
+
+	var items := []
+	for part in r["parts"]:
+		var id: String = _pick(part)
+		var info: Dictionary = Data.ITEMS[id]
+		var dn := ""
+		if info.has("doneness"):
+			dn = _pick(info["doneness"].keys())
+		items.append({"item": id, "doneness": dn})
+
+	var sauce := ""
+	var sauces: Array = r["sauces"]
+	if not sauces.is_empty():
+		sauce = _pick(sauces)
+		if sauce == "Sin salsa":
+			sauce = ""
+
+	var pool: Array = r["toppings"].duplicate()
+	pool.shuffle()
+	var max_t: int = mini(level["max_toppings"], pool.size())
+	var min_t: int = mini(r.get("min_toppings", 0), max_t)
+
+	var order := {
+		"id": next_id,
+		"name": c["name"],
+		"look": c["look"],
+		"arrived": c["arrived"],
+		"heard": c.get("heard", 1),
+		"recipe": rkey,
+		"items": items,
+		"sauce": sauce,
+		"toppings": pool.slice(0, rng.randi_range(min_t, max_t)),
+		"plate": [],          # lo que ya está en el plato (preparaciones sacadas de la bandeja)
+		"plate_sauce": "",
+		"plate_toppings": [],  # toppings completos (desparramados lo suficiente)
+		"sprinkles": {},       # cómo quedaron desparramados: {nombre: {amount, pts}}
+	}
+	return order
+
+
+# =====================================================================
+# Cocina
+# =====================================================================
+
+func _target_for(o, item_id: String) -> float:
+	var info: Dictionary = Data.ITEMS[item_id]
+	for entry in o["items"]:
+		if entry["item"] == item_id and entry["doneness"] != "":
+			return info["doneness"][entry["doneness"]]
+	return info["target"]
+
+
+func _cook(item_id: String) -> void:
+	var info: Dictionary = Data.ITEMS[item_id]
+	var slots: Array = cookers[info["where"]]
+	var idx := slots.find(null)
+	if idx == -1:
+		return
+	# El punto que marca la barra sale del ticket elegido (si pide ese ingrediente)
+	var o = _get_order(selected_id)
+	var target: float = _target_for(o, item_id) if o != null else info["target"]
+	slots[idx] = {"item": item_id, "t": 0.0, "target": target, "burn": info["burn"]}
+	_refresh_all()
+
+
+func _on_slot_clicked(idx: int, appliance: String) -> void:
+	_take_off(appliance, idx)
+
+
+func _take_off(appliance: String, idx: int) -> void:
+	var slot = cookers[appliance][idx]
+	if slot == null:
+		return
+	cookers[appliance][idx] = null
+	var t: float = slot["t"]
+	var label := "%s %.1fs" % [Data.ITEMS[slot["item"]]["name"], t]
+	if t >= slot["burn"]:
+		label = "%s quemado" % Data.ITEMS[slot["item"]]["name"]
+	prepared.append({"item": slot["item"], "t": t, "vtarget": slot["target"], "burn": slot["burn"],
+		"label": label, "pantry": false, "chopped": false})
+	_refresh_all()
+
+
+func _cook_quality(t: float, target: float, burn: float) -> float:
+	if t >= burn:
+		return 0.0
+	var diff := absf(t - target)
+	if diff <= Data.ZONE:
+		return 100.0
+	return clampf(100.0 - (diff - Data.ZONE) * 22.0, 0.0, 100.0)
+
+
+# =====================================================================
+# Tabla de cortar
+# =====================================================================
+
+func _start_chop(item_id: String) -> void:
+	if board != null:
+		return
+	var cuts: int = Data.ITEMS[item_id]["cuts"]
+	if _has("procesadora"):
+		cuts = int(ceil(cuts / 2.0))
+	board = {"item": item_id, "cuts": 0, "need": cuts}
+	_refresh_all()
+
+
+func _chop() -> void:
+	if board == null:
+		return
+	board["cuts"] += 1
+	_play_sfx("corte%d" % (rng.randi() % 3 + 1))
+	if board["cuts"] >= board["need"]:
+		var item_name: String = Data.ITEMS[board["item"]]["name"]
+		prepared.append({"item": board["item"], "t": -1.0, "label": item_name + " cortada",
+			"pantry": false, "chopped": true})
+		board = null
+		_refresh_all()
+	elif board_view != null and is_instance_valid(board_view):
+		board_view.cuts = board["cuts"]
+		board_view.hit()
+		board_info.text = _board_text()
+
+
+func _drop_chop() -> void:
+	board = null
+	_refresh_all()
+
+
+func _board_text() -> String:
+	if board == null:
+		return ""
+	return "Cortando %s\n\n%d de %d cortes\n\nClick en la tabla\no barra espaciadora\n\nLo cortado va a la bandeja\ndel Emplatado." % [
+		Data.ITEMS[board["item"]]["name"], board["cuts"], board["need"]]
+
+
+# =====================================================================
+# Emplatado
+# =====================================================================
+
+func _plate_ready(idx: int) -> void:
+	var o = _get_order(selected_id)
+	if o == null or idx >= prepared.size():
+		return
+	o["plate"].append(prepared[idx])
+	prepared.remove_at(idx)
+	_refresh_all()
+
+
+func _plate_pantry(item_id: String) -> void:
+	var o = _get_order(selected_id)
+	if o == null:
+		return
+	o["plate"].append({"item": item_id, "t": -1.0, "label": Data.ITEMS[item_id]["name"], "pantry": true,
+		"chopped": false})
+	_refresh_all()
+
+
+func _on_plate_drop(data: Dictionary) -> void:
+	match data["kind"]:
+		"prepared": _plate_ready(data["index"])
+		"pantry": _plate_pantry(data["item"])
+		"sauce": _set_plate_sauce(data["name"])
+
+
+func _on_condiment_click(_kind: String, _name: String) -> void:
+	if _get_order(selected_id) != null:
+		_hint("Arrastrá la salsa hasta el plato")
+
+
+## Ingrediente crudo soltado sobre un aparato de la cocina
+func _on_ingredient_to_appliance(item_id: String, appliance: String) -> void:
+	var info: Dictionary = Data.ITEMS[item_id]
+	if info["where"] != appliance:
+		_hint("%s va en %s" % [info["name"], Data.APPLIANCES[info["where"]]["name"].to_lower()])
+		return
+	if not cookers[appliance].has(null):
+		_hint("%s está llena" % Data.APPLIANCES[appliance]["name"])
+		return
+	_cook(item_id)
+
+
+func _on_ingredient_to_board(item_id: String) -> void:
+	if Data.ITEMS[item_id]["kind"] != "chop":
+		_hint("Eso no se corta: va a la cocina")
+		return
+	if board != null:
+		_hint("Terminá de cortar lo que está en la tabla")
+		return
+	_start_chop(item_id)
+
+
+func _drag_hint(item_id: String) -> void:
+	var info: Dictionary = Data.ITEMS[item_id]
+	if info["kind"] == "chop":
+		_hint("Arrastrá %s hasta la tabla" % info["name"].to_lower())
+	else:
+		_hint("Arrastrá %s hasta %s" % [info["name"].to_lower(), Data.APPLIANCES[info["where"]]["name"].to_lower()])
+
+
+func _hint(text: String) -> void:
+	if hint_label != null and is_instance_valid(hint_label):
+		hint_label.queue_free()
+	hint_label = _tag(text, Vector2.ZERO, 18)
+	hint_label.position = Vector2(640 - hint_label.get_minimum_size().x / 2.0, 220)
+	var tw := create_tween()
+	tw.tween_interval(1.2)
+	tw.tween_property(hint_label, "modulate:a", 0.0, 0.5)
+
+
+func _set_plate_sauce(s: String) -> void:
+	var o = _get_order(selected_id)
+	if o != null:
+		o["plate_sauce"] = s
+		_refresh_all()
+
+
+## Saca un topping del plato (click en su bowl cuando ya está puesto)
+func _remove_topping(t: String) -> void:
+	var o = _get_order(selected_id)
+	if o == null:
+		return
+	o["plate_toppings"].erase(t)
+	o["sprinkles"].erase(t)
+	_refresh_all()
+
+
+## Pone un topping completo de una (lo usan las pruebas automáticas)
+func _sprinkle_full(t: String) -> void:
+	var o = _get_order(selected_id)
+	if o == null:
+		return
+	var pts := []
+	for k in 30:
+		pts.append(Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf()) * 0.8)
+	o["sprinkles"][t] = {"amount": 1.0, "pts": pts}
+	if not t in o["plate_toppings"]:
+		o["plate_toppings"].append(t)
+
+
+func _start_sprinkle(t: String) -> void:
+	if _get_order(selected_id) == null or paused:
+		return
+	sprinkle_name = t
+	sprinkle_used = 0.0
+	sprinkle_timer = 0.0
+	var cursor := Painter.new()
+	cursor.animate = true
+	cursor.size = Vector2(1, 1)
+	cursor.z_index = 100
+	cursor.fn = func(ci, time): _draw_sprinkle_cursor(ci, time)
+	add_child(cursor)
+	sprinkle_cursor = cursor
+	sprinkle_cursor.position = get_global_mouse_position()
+
+
+func _draw_sprinkle_cursor(ci: CanvasItem, time: float) -> void:
+	var o = _get_order(selected_id)
+	var amount := 0.0
+	if o != null and o["sprinkles"].has(sprinkle_name):
+		amount = o["sprinkles"][sprinkle_name]["amount"]
+	var over := _sprinkle_over_food()
+	# Bowl inclinado volcando el topping
+	# Bowl apenas inclinado: deja caer un hilito fino
+	ci.draw_set_transform(Vector2(18, -30), -0.45 if over else -0.15, Vector2.ONE)
+	Art.draw_bowl(ci, Rect2(-26, -26, 52, 52), sprinkle_name)
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if over:
+		var info: Dictionary = Art.TOPPINGS.get(sprinkle_name, {"color": Color.WHITE, "shape": "dot"})
+		if info["shape"] == "drizzle":
+			# Hilo continuo que cae del bowl
+			var wob := sin(time * 6.0) * 1.5
+			ci.draw_line(Vector2(-2, -8), Vector2(wob, 12), Color(info["color"], 0.9), 2.0)
+		else:
+			for k in 4:
+				var ph := fmod(time * 2.2 + k / 4.0, 1.0)
+				ci.draw_circle(Vector2(-2 + sin(k * 2.3) * 2.5, -8 + ph * 20), 1.2, Color(info["color"], 1.0 - ph))
+	# Anillo de progreso
+	ci.draw_arc(Vector2(34, 10), 14, 0, TAU, 28, Color(0, 0, 0, 0.5), 5)
+	ci.draw_arc(Vector2(34, 10), 14, -PI / 2, -PI / 2 + TAU * minf(amount, 1.0), 28,
+		Color("5ee06a") if amount >= 1.0 else Color("ffd166"), 5)
+	if not over:
+		Art.text(ci, Vector2(-80, 46), "Pasalo por arriba de la comida", 14, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 200, 4)
+
+
+func _sprinkle_over_food() -> bool:
+	if plating_plate == null or not is_instance_valid(plating_plate):
+		return false
+	return plating_plate.rel_point(plating_plate.get_local_mouse_position()).length() <= 1.0
+
+
+func _update_sprinkle(delta: float) -> void:
+	if sprinkle_name == "":
+		return
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_end_sprinkle()
+		return
+	var o = _get_order(selected_id)
+	if o == null or plating_plate == null or not is_instance_valid(plating_plate):
+		_end_sprinkle()
+		return
+	sprinkle_cursor.position = get_global_mouse_position()
+	if not _sprinkle_over_food():
+		return
+	var rel: Vector2 = plating_plate.rel_point(plating_plate.get_local_mouse_position())
+	if not o["sprinkles"].has(sprinkle_name):
+		o["sprinkles"][sprinkle_name] = {"amount": 0.0, "pts": []}
+	var sp: Dictionary = o["sprinkles"][sprinkle_name]
+	sp["amount"] += delta / Data.SPRINKLE_TIME
+	sprinkle_used += delta
+	var rate: Array = Art.sprinkle_rate(sprinkle_name)
+	sprinkle_timer -= delta
+	if sprinkle_timer <= 0.0 and sp["pts"].size() < rate[1]:
+		sprinkle_timer = rate[0]
+		# Las piezas caen cerca de donde está el bowl (poco salpicado)
+		var jitter := Vector2.ZERO if rate[1] > 100 else Vector2.from_angle(rng.randf() * TAU) * rng.randf() * 0.07
+		sp["pts"].append(rel + jitter)
+	if sp["amount"] >= 1.0 and not sprinkle_name in o["plate_toppings"]:
+		o["plate_toppings"].append(sprinkle_name)
+		_hint("¡Listo: %s!" % sprinkle_name)
+	plating_plate.queue_redraw()
+
+
+func _end_sprinkle() -> void:
+	if sprinkle_name == "":
+		return
+	var t := sprinkle_name
+	sprinkle_name = ""
+	if sprinkle_cursor != null and is_instance_valid(sprinkle_cursor):
+		sprinkle_cursor.queue_free()
+	sprinkle_cursor = null
+	var o = _get_order(selected_id)
+	if o != null and sprinkle_used <= 0.0:
+		# No lo pasó por la comida: si ya estaba puesto, el click lo saca; si no, se le explica
+		if t in o["plate_toppings"]:
+			_remove_topping(t)
+			return
+		_hint("Mantené apretado el bowl y desparramalo arriba de la comida")
+	elif o != null and not t in o["plate_toppings"]:
+		_hint("Te faltó: seguí desparramando %s" % t.to_lower())
+	_refresh_all()
+
+
+func _reset_plate() -> void:
+	var o = _get_order(selected_id)
+	if o == null:
+		return
+	for e in o["plate"]:
+		if not e["pantry"]:
+			prepared.append(e)
+	o["plate"] = []
+	o["plate_sauce"] = ""
+	o["plate_toppings"] = []
+	o["sprinkles"] = {}
+	_refresh_all()
+
+
+func _discard_ready(idx: int) -> void:
+	if idx < prepared.size():
+		prepared.remove_at(idx)
+		_refresh_all()
+
+
+## Costo de tirar una preparación (sale de la caja)
+func _waste_cost(e: Dictionary) -> int:
+	if e.get("pantry", false):
+		return Data.WASTE_COST["ready"]
+	if e.get("chopped", false):
+		return Data.WASTE_COST["chop"]
+	return Data.WASTE_COST["cook"]
+
+
+func _on_trash_drop(data: Dictionary) -> void:
+	var cost := 0
+	match data["kind"]:
+		"prepared":
+			var idx: int = data["index"]
+			if idx >= prepared.size():
+				return
+			cost = _waste_cost(prepared[idx])
+			prepared.remove_at(idx)
+		"plate":
+			var o = _get_order(selected_id)
+			if o == null:
+				return
+			for e in o["plate"]:
+				cost += _waste_cost(e)
+			if o["plate_sauce"] != "":
+				cost += Data.WASTE_COST["condiment"]
+			cost += o["sprinkles"].size() * Data.WASTE_COST["condiment"]
+			o["plate"] = []
+			o["plate_sauce"] = ""
+			o["plate_toppings"] = []
+			o["sprinkles"] = {}
+	money -= cost
+	_refresh_all()
+	if cost > 0:
+		_hint("Tiraste comida: -$%d de la caja" % cost)
+
+
+# =====================================================================
+# Entrega y puntaje
+# =====================================================================
+
+func _deliver() -> void:
+	var o = _get_order(selected_id)
+	if o == null or o["plate"].is_empty():
+		return
+
+	# Componentes: ¿están los que pidió y nada de más? ¿y qué tan bien cocidos?
+	var leftovers: Array = o["plate"].duplicate()
+	var hits := 0
+	var qualities := []
+	for entry in o["items"]:
+		for k in leftovers.size():
+			var e: Dictionary = leftovers[k]
+			if e["item"] == entry["item"]:
+				hits += 1
+				# La cocción se juzga contra el punto que pidió ESTE cliente
+				var q := 100.0
+				if e.get("t", -1.0) >= 0.0:
+					q = _cook_quality(e["t"], _target_for(o, e["item"]), e["burn"])
+				qualities.append(q)
+				leftovers.remove_at(k)
+				break
+	var needed: int = o["items"].size()
+	var s_items := 100.0 * hits / (needed + leftovers.size())
+	var s_cook := 0.0
+	for q in qualities:
+		s_cook += q
+	if not qualities.is_empty():
+		s_cook /= qualities.size()
+
+	var s_sauce := 100.0 if o["plate_sauce"] == o["sauce"] else 0.0
+
+	var wanted: Array = o["toppings"]
+	var put: Array = o["plate_toppings"]
+	var union := {}
+	var top_hits := 0
+	for t in wanted:
+		union[t] = true
+		if t in put:
+			top_hits += 1
+	for t in put:
+		union[t] = true
+	var s_tops := 100.0 if union.is_empty() else 100.0 * top_hits / union.size()
+
+	var wait: float = elapsed - o["arrived"]
+	var patience: float = _patience()
+	var s_wait := clampf(100.0 - maxf(0.0, wait - patience) * 1.0, 0.0, 100.0)
+
+	var total := s_items * 0.3 + s_cook * 0.3 + s_sauce * 0.1 + s_tops * 0.1 + s_wait * 0.2
+	var tip := int(round(total / 10.0))
+	if _has("caramelera"):
+		tip += 1
+	if _has("vajilla"):
+		tip += 3
+	var pay := 15 + tip
+
+	var verdict := "Mmm... no vuelvo"
+	if total >= 90.0:
+		verdict = "¡Espectacular!"
+	elif total >= 75.0:
+		verdict = "Muy rico"
+	elif total >= 55.0:
+		verdict = "Zafa"
+
+	last_result = {
+		"name": o["name"], "look": o["look"], "total": total, "verdict": verdict, "pay": pay, "tip": tip,
+		"lines": ["Ingredientes %d" % int(s_items), "Cocción %d" % int(s_cook), "Salsa %d" % int(s_sauce),
+			"Toppings %d" % int(s_tops), "Espera %d" % int(s_wait)],
+	}
+
+	served += 1
+	score_sum += total
+	money += pay
+	_play_sfx("caja")
+	# Lo que sigue en la cocina o en la bandeja queda disponible para los otros pedidos.
+	orders.erase(o)
+	selected_id = orders[0]["id"] if not orders.is_empty() else -1
+	_refresh_all()
+
+
+# =====================================================================
+# Interfaz general
+# =====================================================================
+
+func _make_theme() -> Theme:
+	var th := Theme.new()
+	th.default_font_size = 18
+	th.set_stylebox("normal", "Button", _sb(Color("f6e7c8"), Color("8a5a2b")))
+	th.set_stylebox("hover", "Button", _sb(Color("fff4de"), Color("8a5a2b")))
+	th.set_stylebox("pressed", "Button", _sb(Color("e9d2a6"), Color("8a5a2b")))
+	th.set_stylebox("disabled", "Button", _sb(Color(0.85, 0.8, 0.72, 0.55), Color(0.5, 0.4, 0.3, 0.4)))
+	th.set_stylebox("focus", "Button", StyleBoxEmpty.new())
+	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "font_hover_pressed_color"]:
+		th.set_color(c, "Button", COL_INK)
+	th.set_color("font_disabled_color", "Button", Color(0.35, 0.28, 0.2, 0.6))
+	th.set_constant("icon_max_width", "Button", 40)
+	th.set_constant("h_separation", "Button", 10)
+	return th
+
+
+func _sb(bg: Color, border: Color, radius := 10, bw := 2) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = border
+	sb.set_border_width_all(bw)
+	sb.set_corner_radius_all(radius)
+	sb.content_margin_left = 12
+	sb.content_margin_right = 12
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
+	sb.shadow_color = Color(0, 0, 0, 0.25)
+	sb.shadow_size = 3
+	sb.shadow_offset = Vector2(0, 2)
+	return sb
+
+
+func _build_ui() -> void:
+	var bg := ColorRect.new()
+	bg.color = COL_BG
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
+
+	var draw_hud := func(ci, _t):
+		Art.wood(ci, Rect2(0, 0, 1280, 44), Color("7a4a2a"), 22)
+		ci.draw_rect(Rect2(0, 40, 1280, 4), Color(0, 0, 0, 0.35))
+	_painter(Rect2(0, 0, 1280, 44), draw_hud, false, self)
+	lbl_level = _label("", 22, Color.WHITE, 5)
+	lbl_level.position = Vector2(14, 6)
+	add_child(lbl_level)
+	lbl_customers = _label("", 19, Color.WHITE, 5)
+	lbl_customers.position = Vector2(830, 9)
+	add_child(lbl_customers)
+	lbl_money = _label("", 19, Color("ffe08a"), 5)
+	lbl_money.position = Vector2(1110, 9)
+	add_child(lbl_money)
+	music_button = _button("", _toggle_music, 14)
+	music_button.position = Vector2(700, 5)
+	music_button.tooltip_text = "Prender o apagar la música (tecla M)"
+	add_child(music_button)
+	pause_button = _button("⏸ Pausa", _toggle_pause, 14)
+	pause_button.position = Vector2(450, 5)
+	pause_button.tooltip_text = "Pausar el día (P o Esc)"
+	add_child(pause_button)
+	sfx_button = _button("", _toggle_sfx, 14)
+	sfx_button.position = Vector2(560, 5)
+	sfx_button.tooltip_text = "Prender o apagar los sonidos de la cocina"
+	add_child(sfx_button)
+
+	var draw_rail := func(ci, _t):
+		Art.grad_rect(ci, Rect2(0, 0, 1280, 140), Color("4a4f55"), Color("2f3338"))
+		Art.grad_rect(ci, Rect2(0, 4, 1280, 9), Color("e3e8ec"), Color("8d98a3"))
+		ci.draw_rect(Rect2(0, 13, 1280, 3), Color(0, 0, 0, 0.3))
+	_painter(Rect2(0, 44, 1280, 140), draw_rail, false, self)
+	ticket_rail = HBoxContainer.new()
+	ticket_rail.position = Vector2(10, 52)
+	ticket_rail.size = Vector2(1260, 128)
+	ticket_rail.add_theme_constant_override("separation", 8)
+	add_child(ticket_rail)
+
+	station_box = Control.new()
+	station_box.position = Vector2(0, 184)
+	station_box.size = STATION_SIZE
+	station_box.clip_contents = true
+	add_child(station_box)
+
+	var draw_tabs := func(ci, _t): Art.wood(ci, Rect2(0, 0, 1280, 70), Color("5e3a22"), 35)
+	_painter(Rect2(0, 650, 1280, 70), draw_tabs, false, self)
+	var tabs := HBoxContainer.new()
+	tabs.position = Vector2(8, 656)
+	tabs.size = Vector2(1264, 58)
+	tabs.add_theme_constant_override("separation", 8)
+	add_child(tabs)
+	for i in STATIONS.size():
+		var b := _button("", _go_to_station.bind(i), 19)
+		b.icon = Art.tex(TAB_ICONS[i])
+		b.expand_icon = false
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tabs.add_child(b)
+		tab_buttons.append(b)
+
+
+func _refresh_all() -> void:
+	_refresh_tickets()
+	_refresh_station()
+	_update_hud()
+	_update_tabs()
+
+
+func _update_hud() -> void:
+	lbl_level.text = level.get("name", "")
+	lbl_customers.text = "Servidos: %d/%d" % [served, level.get("customers", 0)] + ("  (se fueron %d)" % lost if lost > 0 else "")
+	lbl_money.text = "Caja: $%d" % money
+	lbl_money.add_theme_color_override("font_color", Color("ff8a7a") if money < 0 else Color("ffe08a"))
+
+
+func _update_tabs() -> void:
+	var smoking := false
+	for a in cookers:
+		for s in cookers[a]:
+			if s != null and s["t"] >= s["burn"] - 3.0:
+				smoking = true
+	for i in tab_buttons.size():
+		var txt := "%d · %s" % [i + 1, STATIONS[i]]
+		if i == 0 and not queue.is_empty():
+			txt += " (%d)" % queue.size()
+		if i == 1 and smoking:
+			txt += " ¡se quema!"
+		if i == 2 and board != null:
+			txt += " (cortando)"
+		var b: Button = tab_buttons[i]
+		b.text = txt
+		if i == current_station:
+			b.add_theme_stylebox_override("normal", _sb(COL_SELECTED, Color("8a5a2b"), 10, 3))
+			b.add_theme_stylebox_override("hover", _sb(COL_SELECTED.lightened(0.2), Color("8a5a2b"), 10, 3))
+		else:
+			b.remove_theme_stylebox_override("normal")
+			b.remove_theme_stylebox_override("hover")
+		if i == 1 and smoking:
+			b.add_theme_color_override("font_color", Color("c0281a"))
+		else:
+			b.remove_theme_color_override("font_color")
+
+
+func _go_to_station(i: int) -> void:
+	_end_sprinkle()
+	current_station = i
+	_refresh_station()
+	_update_tabs()
+
+
+func _select_order(id: int) -> void:
+	selected_id = id
+	_refresh_all()
+
+
+# --- Tickets ---
+
+func _refresh_tickets() -> void:
+	_clear(ticket_rail)
+	ticket_labels.clear()
+	ticket_heads.clear()
+	if orders.is_empty():
+		ticket_rail.add_child(_label("Sin pedidos. Andá a Pedidos (tecla 1) a atender el mostrador.", 18, Color(1, 1, 1, 0.8), 4))
+		return
+	for o in orders:
+		var b := _button("", _select_order.bind(o["id"]), 13)
+		b.custom_minimum_size = Vector2(200, 126)
+		var sel: bool = o["id"] == selected_id
+		var sb := _sb(COL_SELECTED if sel else COL_PAPER, Color("c9a86a") if not sel else Color("b07a10"), 4, 3 if sel else 1)
+		for st in ["normal", "hover", "pressed", "focus", "disabled"]:
+			b.add_theme_stylebox_override(st, sb)
+		var lbl := _label("", 13, COL_INK)
+		lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		lbl.offset_left = 8
+		lbl.offset_top = 4
+		lbl.offset_right = -6
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		b.add_child(lbl)
+		var head := CustomerView.new()
+		head.look = o["look"]
+		head.head_only = true
+		head.scale_factor = 0.62
+		head.position = Vector2(150, 2)
+		head.size = Vector2(46, 46)
+		b.add_child(head)
+		ticket_rail.add_child(b)
+		ticket_labels[o["id"]] = lbl
+		ticket_heads[o["id"]] = head
+	_update_ticket_texts()
+
+
+func _update_ticket_texts() -> void:
+	for o in orders:
+		if ticket_labels.has(o["id"]):
+			ticket_labels[o["id"]].text = _ticket_text(o)
+			ticket_heads[o["id"]].mood = _mood(elapsed - o["arrived"])
+
+
+func _ticket_text(o) -> String:
+	var wait := int(elapsed - o["arrived"])
+	var head := "#%d %s · %ds" % [o["id"], o["name"], wait]
+	if _mood(wait) >= 3:
+		head = "#%d %s · ¡se va en %ds!" % [o["id"], o["name"], maxi(0, int(_patience() * Data.LEAVE_FACTOR) - wait)]
+	var lines := [head,
+		Data.RECIPES[o["recipe"]]["name"].to_upper()]
+	for entry in o["items"]:
+		lines.append("· %s %s" % [_req_text(entry), _item_progress(o, entry["item"])])
+	if not Data.RECIPES[o["recipe"]]["sauces"].is_empty():
+		lines.append("Salsa: " + (o["sauce"] if o["sauce"] != "" else "sin salsa"))
+	var tops: Array = o["toppings"]
+	if not tops.is_empty():
+		lines.append("+ " + ", ".join(PackedStringArray(tops)))
+	return "\n".join(PackedStringArray(lines))
+
+
+func _req_text(entry) -> String:
+	var txt: String = Data.ITEMS[entry["item"]]["name"]
+	if entry["doneness"] != "":
+		txt += " " + entry["doneness"]
+	return txt
+
+
+func _item_progress(o, item_id: String) -> String:
+	for e in o["plate"]:
+		if e["item"] == item_id:
+			return "(plato)"
+	for e in prepared:
+		if e["item"] == item_id:
+			return "(bandeja)"
+	for a in cookers:
+		for s in cookers[a]:
+			if s != null and s["item"] == item_id:
+				return "(cocinando)"
+	if board != null and board["item"] == item_id:
+		return "(cortando)"
+	return ""
+
+
+# =====================================================================
+# Estaciones
+# =====================================================================
+
+func _refresh_station() -> void:
+	_clear(station_box)
+	customer_views.clear()
+	plating_plate = null
+	take_button = null
+	board_view = null
+	board_info = null
+	if not playing:
+		return
+	match current_station:
+		0: _build_orders_station()
+		1: _build_kitchen_station()
+		2: _build_board_station()
+		3: _build_plating_station()
+		4: _build_delivery_station()
+	# Luz ambiente por encima de todo (no bloquea el mouse)
+	var light := func(ci, _t): Art.draw_lighting(ci, Rect2(Vector2.ZERO, STATION_SIZE))
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), light, false)
+
+
+# --- 1. Mostrador ---
+
+func _build_orders_station() -> void:
+	var menu := []
+	for r in recipes:
+		menu.append(Data.RECIPES[r]["name"])
+	var draw_bg := func(ci, t): Art.draw_dining(ci, Rect2(Vector2.ZERO, STATION_SIZE), menu, t, owned)
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, true)
+
+	for wk in walkers:
+		_add_customer_view(wk, false)
+	for i in range(queue.size() - 1, -1, -1):
+		_add_customer_view(queue[i], true)
+
+	# La moza del mostrador, con libreta y birome
+	if waiter_look.is_empty():
+		waiter_look = Art.waiter_look()
+	var waiter := CustomerView.new()
+	waiter.look = waiter_look
+	waiter.scale_factor = 1.25
+	waiter.size = Vector2(240, 320)
+	waiter.position = Vector2(WAITER_X - 120, 24)
+	station_box.add_child(waiter)
+	customer_views.append({"src": {}, "v": waiter, "queued": false, "waiter": true})
+
+	var has_candy := _has("caramelera")
+	var draw_front := func(ci, _t):
+		Art.draw_counter(ci, Rect2(0, 0, 1280, 236), 88)
+		Art.draw_tex(ci, Art.tex("kitchen/register"), Rect2(900, -6, 130, 100))
+		if has_candy:
+			Art.candy_jar(ci, Rect2(1060, 20, 60, 70))
+	_painter(Rect2(0, 230, 1280, 236), draw_front, false)
+
+	take_button = _prop(Rect2(420, 336, 150, 120))
+	take_button.texture = Art.tex("kitchen/notepad")
+	take_button.text = "Tomar pedido"
+	take_button.text_size = 15
+	take_button.pressed.connect(_begin_take_order)
+
+	if queue.is_empty():
+		var msg := "No hay nadie esperando."
+		if spawned >= level["customers"]:
+			msg = "Ya no entran más clientes hoy: terminá los pedidos que quedan."
+		var t := _tag(msg, Vector2(0, 0), 18)
+		t.position = Vector2(640 - t.get_minimum_size().x / 2.0, 250)
+	_update_customer_views()
+
+
+func _add_customer_view(src: Dictionary, queued: bool) -> void:
+	var v := CustomerView.new()
+	v.look = src["look"]
+	v.scale_factor = 1.25
+	v.size = Vector2(240, 320)
+	v.position = Vector2(src["x"] - 120, 24)
+	station_box.add_child(v)
+	if queued:
+		v.clicked.connect(_begin_take_order)
+	else:
+		v.bubble_lift = 46.0
+		v.bubble_while_walking = true
+	customer_views.append({"src": src, "v": v, "queued": queued})
+
+
+func _update_customer_views() -> void:
+	var first_ready := not queue.is_empty() and absf(queue[0]["x"] - _queue_x(0)) < 2.0
+	var writing := not pending_order.is_empty()
+	waiter_look["writing"] = writing
+	for cv in customer_views:
+		var v = cv["v"]
+		if not is_instance_valid(v):
+			continue
+		if cv.get("waiter", false):
+			v.bubble = "Anotado..." if writing else ("¡Buenas! ¿Qué le sirvo?" if first_ready else "")
+			v.bubble_lift = 0.0
+			continue
+		var src: Dictionary = cv["src"]
+		v.position.x = src["x"] - 120
+		if cv["queued"]:
+			var i := queue.find(src)
+			if i == -1:
+				v.visible = false
+				continue
+			v.walking = absf(src["x"] - _queue_x(i)) > 2.0
+			v.mood = _mood(elapsed - src["arrived"])
+			var is_first: bool = i == 0 and first_ready
+			v.clickable = is_first and not writing
+			v.bubble = ""
+			v.bubble_lift = 46.0 if i % 2 == 1 else 0.0   # alternar alturas para que no se pisen
+			if is_first and writing:
+				v.bubble = _order_speech(pending_order)
+				v.bubble_lift = 46.0
+			elif is_first and v.mood >= 1:
+				v.bubble = _wait_line(src, v.mood)
+			elif not is_first and v.mood >= 2 and (int(elapsed / 5.0) + i) % 3 == 0:
+				v.bubble = _wait_line(src, v.mood)   # los de atrás también se quejan, de a ratos
+		else:
+			var leaving: bool = src.get("dir", 1) < 0
+			v.mood = src.get("mood", 0)
+			v.walking = leaving or src["x"] > _queue_x(0) + 20.0
+			v.bubble = src["bubble"] if leaving or src["x"] < WAITER_X - 60.0 else ""
+	if take_button != null:
+		take_button.visible = first_ready and not writing
+
+
+# --- 2. Cocina ---
+
+func _build_kitchen_station() -> void:
+	var o = _get_order(selected_id)
+	var draw_bg := func(ci, _t): Art.draw_kitchen_wall(ci, Rect2(Vector2.ZERO, STATION_SIZE))
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
+	var header := "Lo que cocines va a la bandeja y sirve para cualquier pedido"
+	if o != null:
+		header = "Ticket #%d %s: %s  ·  lo cocinado va a la bandeja compartida" % [o["id"], o["name"], Data.RECIPES[o["recipe"]]["name"]]
+	_tag(header, Vector2(12, 4), 15)
+
+	var cook_items := _unlocked_items("cook")
+	var used := Data.APPLIANCE_ORDER.filter(func(a):
+		return not cook_items.filter(func(id): return Data.ITEMS[id]["where"] == a).is_empty())
+	# Con muchos aparatos se achican un poco para que la heladera tenga lugar
+	var k: float = [1.0, 1.0, 1.0, 0.92, 0.82][used.size()]
+	var x := 12.0
+	for a in used:
+		var av := ApplianceView.new()
+		av.kind = a
+		av.slots = cookers[a]
+		av.show_zone = level["show_zone"] or _has("reloj")
+		av.position = Vector2(x, 36)
+		av.size = Vector2(236, 330)
+		av.scale = Vector2(k, k)
+		av.slot_clicked.connect(_on_slot_clicked.bind(a))
+		av.ingredient_dropped.connect(_on_ingredient_to_appliance.bind(a))
+		station_box.add_child(av)
+		x += 236.0 * k + 10.0
+
+	var book_btn := _button("Recetario general (R)", _toggle_recipes, 13)
+	book_btn.position = Vector2(STATION_SIZE.x - 176, 1)
+	book_btn.tooltip_text = "Tiempos de cocción y temperaturas de todo el menú"
+	station_box.add_child(book_btn)
+
+	# Abajo de los aparatos: la receta del ticket elegido
+	var top := 36.0 + 330.0 * k + 6.0
+	_build_order_recipe(o, Rect2(12, top, x - 18.0, STATION_SIZE.y - top - 4.0))
+
+	# Heladera con los ingredientes crudos: se arrastran hasta el aparato que corresponde
+	var fx := x + 4.0
+	var fw := STATION_SIZE.x - fx - 10.0
+	var n := cook_items.size()
+	var cols := clampi(int(fw / 100.0), 1, maxi(n, 1))
+	var rows := int(ceil(n / float(cols)))
+	var cw := minf(fw / cols, 140.0)
+	var ch := minf(400.0 / maxi(rows, 1), 120.0)
+	var draw_fridge := func(ci, _t):
+		Art.rrect(ci, Rect2(0, 0, fw, 430), Color("dfe5ea"), 10, Color("9aa3ab"), 4)
+		Art.rrect(ci, Rect2(8, 26, fw - 16, 396), Color("f6f9fb"), 6)
+		Art.text(ci, Vector2(0, 19), "HELADERA · arrastrá a la cocina", 13, Color("4a5560"), HORIZONTAL_ALIGNMENT_CENTER, fw)
+		for r in rows:
+			var y := 26.0 + (r + 1) * ch
+			ci.draw_rect(Rect2(8, y - 4, fw - 16, 4), Color("c5ccd2"))
+	_painter(Rect2(fx, 30, fw, 430), draw_fridge, false)
+	for j in n:
+		var id: String = cook_items[j]
+		var b := _prop(Rect2(fx + (fw - cw * cols) / 2.0 + (j % cols) * cw, 58 + (j / cols) * ch, cw, ch - 6))
+		b.texture = Art.food_raw(id)
+		b.text = Data.ITEMS[id]["name"]
+		b.text_size = 13
+		b.tooltip_text = "Arrastralo hasta %s" % Data.APPLIANCES[Data.ITEMS[id]["where"]]["name"].to_lower()
+		b.drag_data = {"kind": "raw", "item": id}
+		b.pressed.connect(_drag_hint.bind(id))
+	recipe_panel = null
+
+
+## Receta del pedido elegido: un paso por ingrediente (dónde va, a qué punto y cómo viene) y lo del emplatado.
+func _build_order_recipe(o, rect: Rect2) -> void:
+	var card := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = COL_PAPER
+	sb.set_corner_radius_all(8)
+	sb.border_color = Color("c9a86a")
+	sb.set_border_width_all(2)
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	sb.content_margin_top = 4
+	sb.content_margin_bottom = 4
+	sb.shadow_color = Color(0, 0, 0, 0.3)
+	sb.shadow_size = 4
+	sb.shadow_offset = Vector2(2, 3)
+	card.add_theme_stylebox_override("panel", sb)
+	card.position = rect.position
+	card.size = rect.size
+	card.custom_minimum_size = rect.size
+	card.clip_contents = true
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	station_box.add_child(card)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	card.add_child(box)
+	if o == null:
+		box.add_child(_label("RECETA · Elegí un ticket de arriba para ver acá qué lleva ese pedido.", 14, COL_INK))
+		return
+	var r: Dictionary = Data.RECIPES[o["recipe"]]
+	box.add_child(_label("RECETA de #%d %s — %s" % [o["id"], o["name"], r["name"]], 14, COL_INK))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(row)
+	var compact := rect.size.y < 110.0
+	var n := 1
+	for entry in o["items"]:
+		row.add_child(_recipe_step(n, o, entry, compact))
+		n += 1
+	# Lo que va al emplatar
+	var fin := []
+	if not r["sauces"].is_empty():
+		fin.append("Salsa: " + (o["sauce"] if o["sauce"] != "" else "sin salsa"))
+	var tops: Array = o["toppings"]
+	if not tops.is_empty():
+		fin.append("Toppings: " + ", ".join(PackedStringArray(tops)))
+	if not fin.is_empty():
+		var step := VBoxContainer.new()
+		step.add_theme_constant_override("separation", 0)
+		step.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		step.add_child(_label("%d. Al emplatar" % n, 12, COL_INK))
+		var l := _label("\n".join(PackedStringArray(fin)), 11, Color(0.3, 0.24, 0.18))
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size = Vector2(120, 0)
+		step.add_child(l)
+		row.add_child(step)
+
+
+func _recipe_step(n: int, o, entry: Dictionary, compact: bool) -> Control:
+	var id: String = entry["item"]
+	var info: Dictionary = Data.ITEMS[id]
+	var step := HBoxContainer.new()
+	step.add_theme_constant_override("separation", 4)
+	step.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var pic := PropButton.new()
+	pic.custom_minimum_size = Vector2(40, 40) if compact else Vector2(56, 56)
+	pic.texture = Art.food_raw(id) if info["kind"] == "cook" else Art.food(id)
+	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pic.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	step.add_child(pic)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", -2 if compact else 2)
+	step.add_child(col)
+	var fs := 0 if compact else 2   # con más lugar, letra más grande
+	col.add_child(_label("%d. %s" % [n, _req_text(entry)], 12 + fs, COL_INK))
+	var how := ""
+	match info["kind"]:
+		"cook":
+			var where: String = Data.APPLIANCES[info["where"]]["name"]
+			if info.has("temps"):
+				var temp: int = info.get("target_temp", 0)
+				if entry["doneness"] != "":
+					temp = info["doneness_temp"][entry["doneness"]]
+				how = "%s · sacar a %d°C" % [where, temp]
+			else:
+				how = "%s · %d segundos" % [where, int(_target_for(o, id))]
+		"chop":
+			var cuts: int = info["cuts"]
+			if _has("procesadora"):
+				cuts = int(ceil(cuts / 2.0))
+			how = "Tabla · %d cortes" % cuts
+		"ready":
+			how = "Despensa (en Emplatado)"
+	col.add_child(_label(how, 11 + fs, Color("2f5d50")))
+	var status := _item_progress(o, id)
+	if status == "":
+		status = "(falta)"
+	col.add_child(_label(status, 11 + fs, Color("b0501a") if status == "(falta)" else Color("2f7a3a")))
+	return step
+
+
+func _toggle_recipes() -> void:
+	if recipe_panel != null and is_instance_valid(recipe_panel):
+		recipe_panel.queue_free()
+		recipe_panel = null
+		return
+	if current_station != 1:
+		return
+	var lines := []
+	for id in _unlocked_items("cook"):
+		lines.append(_cook_time_text(id))
+	var txt := "RECETARIO\n\n" + "\n".join(PackedStringArray(lines))
+	txt += "\n\nLas carnes se miden con el termómetro: sacalas cuando llegan a la temperatura del punto pedido."
+	recipe_panel = _card(Rect2(300, 30, 520, 400), txt, 15)
+	recipe_panel.clip_text = false
+	var close := _button("Cerrar", _toggle_recipes, 14)
+	close.position = Vector2(720, 390)
+	recipe_panel.add_child(close)
+	close.position = Vector2(420, 350)
+
+
+func _cook_time_text(id: String) -> String:
+	var info: Dictionary = Data.ITEMS[id]
+	if info.has("doneness_temp"):
+		var parts := []
+		for dn in info["doneness_temp"]:
+			parts.append("%s %d°C" % [dn, int(info["doneness_temp"][dn])])
+		return "%s: %s" % [info["name"], " · ".join(PackedStringArray(parts))]
+	if info.has("target_temp"):
+		return "%s: %d°C (termómetro)" % [info["name"], int(info["target_temp"])]
+	return "%s: %ds" % [info["name"], int(info["target"])]
+
+
+# --- 3. Tabla ---
+
+func _build_board_station() -> void:
+	var o = _get_order(selected_id)
+	var draw_bg := func(ci, _t): Art.draw_wood_counter(ci, Rect2(Vector2.ZERO, STATION_SIZE))
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
+	var chop_items := _unlocked_items("chop")
+	if chop_items.is_empty():
+		_tag("Todavía no hay nada para cortar en el menú de hoy.", Vector2(20, 8), 18)
+		return
+	var head := "Tabla de cortar  ·  lo cortado va a la bandeja compartida"
+	if o != null:
+		head = "Ticket #%d %s: %s  ·  lo cortado va a la bandeja" % [o["id"], o["name"], Data.RECIPES[o["recipe"]]["name"]]
+	_tag(head, Vector2(12, 4), 15)
+
+	for j in chop_items.size():
+		var id: String = chop_items[j]
+		var b := _prop(Rect2(24 + (j % 2) * 116, 50 + (j / 2) * 110, 110, 104))
+		b.food_id = id
+		b.text = Data.ITEMS[id]["name"]
+		b.text_size = 14
+		b.draw_fn = func(ci, r):
+			Art.ellipse(ci, r.get_center() + Vector2(0, r.size.y * 0.25), Vector2(r.size.x * 0.48, r.size.y * 0.22), Color("8a5a2b"))
+			Art.ellipse(ci, r.get_center() + Vector2(0, r.size.y * 0.2), Vector2(r.size.x * 0.44, r.size.y * 0.18), Color("b98249"))
+			Art.draw_food(ci, id, r.grow(-6))
+		b.disabled = board != null
+		b.drag_data = {"kind": "raw", "item": id}
+		b.tooltip_text = "Arrastrala hasta la tabla"
+		b.pressed.connect(_drag_hint.bind(id))
+
+	board_view = BoardView.new()
+	board_view.position = Vector2(290, 46)
+	board_view.size = Vector2(620, 414)
+	if board != null:
+		board_view.item_id = board["item"]
+		board_view.cuts = board["cuts"]
+		board_view.need = board["need"]
+	board_view.chop_clicked.connect(_chop)
+	board_view.ingredient_dropped.connect(_on_ingredient_to_board)
+	station_box.add_child(board_view)
+
+	var info_text := _board_text()
+	if board == null:
+		info_text = "Arrastrá una verdura\nde la izquierda hasta\nla tabla para cortarla."
+	board_info = _card(Rect2(940, 60, 320, 230), info_text, 18)
+	if board != null:
+		var drop := _button("Dejar esto", _drop_chop, 16)
+		drop.position = Vector2(1030, 310)
+		station_box.add_child(drop)
+
+
+# --- 4. Emplatado ---
+
+func _build_plating_station() -> void:
+	var o = _get_order(selected_id)
+	var draw_bg := func(ci, _t): Art.draw_marble(ci, Rect2(Vector2.ZERO, STATION_SIZE))
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
+	if o == null:
+		_tag("Elegí un ticket de arriba para armar el plato.", Vector2(12, 4), 16)
+		return
+	var r: Dictionary = Data.RECIPES[o["recipe"]]
+	_tag("Plato de #%d %s — %s" % [o["id"], o["name"], r["name"]], Vector2(12, 4), 16)
+
+	# Izquierda: la bandeja compartida y la despensa (se arrastran al plato o click)
+	_tag("Bandeja (arrastrá al plato)", Vector2(16, 42), 15)
+	if prepared.is_empty():
+		_label_at("(vacía: cociná o cortá\nen las otras estaciones)", Vector2(20, 80), 14, Color(0.25, 0.2, 0.15))
+	var cols := 3 if prepared.size() <= 6 else 4
+	var tw := 384.0 / cols
+	var shown := mini(prepared.size(), cols * 3)
+	for k in shown:
+		var e: Dictionary = prepared[k]
+		var b := _prop(Rect2(16 + (k % cols) * tw, 72 + (k / cols) * 90, tw - 4, 86))
+		b.entry = e
+		b.text = e["label"]
+		b.text_size = 11 if cols == 3 else 10
+		b.tooltip_text = "Arrastralo al plato (o hacé click). Para tirarlo, arrastralo al cesto (cuesta plata)."
+		b.drag_data = {"kind": "prepared", "index": k}
+		b.pressed.connect(_plate_ready.bind(k))
+	var pantry := _unlocked_items("ready")
+	if not pantry.is_empty():
+		var py := 72.0 + maxi(1, int(ceil(shown / float(cols)))) * 90.0 + 6.0
+		_tag("Despensa", Vector2(16, py), 15)
+		for k in pantry.size():
+			var b := _prop(Rect2(16 + k * 128, py + 28, 124, 84))
+			b.food_id = pantry[k]
+			b.text = Data.ITEMS[pantry[k]]["name"]
+			b.text_size = 12
+			b.drag_data = {"kind": "pantry", "item": pantry[k]}
+			b.pressed.connect(_plate_pantry.bind(pantry[k]))
+
+	# Centro: el plato (recibe lo que se arrastra)
+	var plate := PlateView.new()
+	plate.position = Vector2(410, 36)
+	plate.size = Vector2(420, 384)
+	plate.items = o["plate"]
+	plate.sauce = o["plate_sauce"]
+	plate.toppings = o["plate_toppings"]
+	plate.sprinkles = o["sprinkles"]
+	plate.gold = _has("vajilla")
+	plate.seed = o["id"]
+	plate.accept_drops = true
+	plate.dropped.connect(_on_plate_drop)
+	station_box.add_child(plate)
+	plating_plate = plate
+	var reset := _button("Rehacer plato", _reset_plate, 15)
+	reset.position = Vector2(556, 424)
+	reset.tooltip_text = "Devuelve lo del plato a la bandeja. Para tirar el plato, arrastralo al cesto."
+	station_box.add_child(reset)
+
+	# Abajo a la derecha: el cesto de basura
+	var trash := TrashView.new()
+	trash.position = Vector2(1188, 344)
+	trash.size = Vector2(84, 118)
+	trash.dropped.connect(_on_trash_drop)
+	station_box.add_child(trash)
+
+	# Derecha: salsas y toppings del mismo tipo de plato
+	var x0 := 846.0
+	var y := 42.0
+	var sauces := _cat_options(r["cat"], "sauces")
+	if not sauces.is_empty():
+		_tag("Salsas (arrastrá al plato)", Vector2(x0, y), 15)
+		var opts := [""] + sauces
+		for k in opts.size():
+			var s: String = opts[k]
+			var b := _prop(Rect2(x0 + (k % 4) * 84, y + 30 + (k / 4) * 92, 80, 88))
+			b.text = s if s != "" else "Sin salsa"
+			b.text_size = 10
+			b.selected = o["plate_sauce"] == s
+			if s == "":
+				b.draw_fn = func(ci, rr): Art.draw_none(ci, rr)
+				b.tooltip_text = "Sacar la salsa"
+				b.pressed.connect(_set_plate_sauce.bind(""))
+			else:
+				var col: Color = Art.SAUCE_COLORS.get(s, Color.WHITE)
+				b.draw_fn = func(ci, rr): Art.draw_bottle(ci, rr, col)
+				b.drag_data = {"kind": "sauce", "name": s}
+				b.tooltip_text = "Arrastrá la salsa hasta el plato"
+				b.pressed.connect(_on_condiment_click.bind("sauce", s))
+		y += 30 + ceil(opts.size() / 4.0) * 92 + 4
+	var tops := _cat_options(r["cat"], "toppings")
+	if not tops.is_empty():
+		_tag("Toppings (mantené y desparramá)", Vector2(x0, y), 15)
+		for k in tops.size():
+			var tname: String = tops[k]
+			var b := _prop(Rect2(x0 + (k % 4) * 84, y + 30 + (k / 4) * 82, 80, 80))
+			var pct := 0
+			if o["sprinkles"].has(tname):
+				pct = int(minf(o["sprinkles"][tname]["amount"], 1.0) * 100.0)
+			# Sin texto: el bowl muestra el dibujo del topping; a medias, un anillo de progreso
+			b.selected = tname in o["plate_toppings"]
+			var frac := pct / 100.0
+			b.draw_fn = func(ci, rr):
+				Art.draw_bowl(ci, rr, tname)
+				if frac > 0.0 and frac < 1.0:
+					var cc: Vector2 = rr.get_center()
+					var rad := minf(rr.size.x, rr.size.y) * 0.5
+					ci.draw_arc(cc, rad, 0, TAU, 32, Color(0, 0, 0, 0.25), 4)
+					ci.draw_arc(cc, rad, -PI / 2, -PI / 2 + TAU * frac, 32, Color("ffd166"), 4)
+			b.mouse_default_cursor_shape = Control.CURSOR_DRAG
+			b.tooltip_text = "%s: mantené apretado y pasalo unos segundos por arriba de la comida (click si ya está puesto para sacarlo)" % tname
+			b.held.connect(_start_sprinkle.bind(tname))
+
+
+# --- 5. Entrega ---
+
+func _build_delivery_station() -> void:
+	var o = _get_order(selected_id)
+	var draw_bg := func(ci, t): Art.draw_pass(ci, Rect2(Vector2.ZERO, STATION_SIZE), t)
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, true)
+
+	if not last_result.is_empty():
+		var res := last_result
+		var draw_res := func(ci, t):
+			Art.draw_paper(ci, Rect2(0, 0, 274, 270))
+			Art.text(ci, Vector2(0, 40), "ÚLTIMA ENTREGA", 15, COL_INK, HORIZONTAL_ALIGNMENT_CENTER, 274)
+			var mood := 0 if res["total"] >= 75.0 else (1 if res["total"] >= 55.0 else 3)
+			Art.draw_character(ci, res["look"], Vector2(52, 112), 0.85, mood, t, true)
+			Art.text(ci, Vector2(96, 76), res["name"], 16, COL_INK)
+			Art.text(ci, Vector2(96, 104), "%d%%" % int(res["total"]), 28, COL_INK)
+			Art.text(ci, Vector2(170, 104), _stars_icons(res["total"]), 18, Color("e0a020"))
+			Art.text(ci, Vector2(14, 140), "\"%s\"" % res["verdict"], 17, COL_INK)
+			var lines: Array = res["lines"]
+			for k in lines.size():
+				Art.text(ci, Vector2(14 + (k % 2) * 130, 166 + (k / 2) * 22), lines[k], 13, Color(0.3, 0.25, 0.2))
+			Art.text(ci, Vector2(14, 250), "+$%d (propina $%d)" % [res["pay"], res["tip"]], 16, Color("2f7a3a"))
+		_painter(Rect2(990, 24, 274, 270), draw_res, true)
+
+	if o == null:
+		_tag("Elegí un ticket de arriba para servir.", Vector2(12, 4), 16)
+		return
+	_tag("Servir a #%d %s" % [o["id"], o["name"]], Vector2(12, 4), 16)
+
+	var cv := CustomerView.new()
+	cv.look = o["look"]
+	cv.scale_factor = 1.15
+	cv.position = Vector2(530, 4)
+	cv.size = Vector2(220, 298)
+	cv.mood = _mood(elapsed - o["arrived"])
+	if cv.mood >= 1:
+		cv.bubble = _wait_line(o, cv.mood)
+	station_box.add_child(cv)
+
+	var plate := PlateView.new()
+	plate.position = Vector2(520, 262)
+	plate.size = Vector2(240, 200)
+	plate.items = o["plate"]
+	plate.sauce = o["plate_sauce"]
+	plate.toppings = o["plate_toppings"]
+	plate.sprinkles = o["sprinkles"]
+	plate.gold = _has("vajilla")
+	plate.seed = o["id"]
+	station_box.add_child(plate)
+
+	var bell := _prop(Rect2(800, 330, 120, 126))
+	bell.texture = Art.tex("kitchen/bell")
+	bell.text = "¡Servir!"
+	bell.text_size = 17
+	bell.disabled = o["plate"].is_empty()
+	bell.pressed.connect(_deliver)
+
+	var txt := "PIDIÓ\n" + _order_text(o) + "\n\nEN EL PLATO\n" + _plate_text(o)
+	if o["plate"].is_empty():
+		txt += "\n\n(Armá el plato en Emplatado, tecla 4)"
+	_card(Rect2(16, 40, 300, 290), txt, 14)
+
+
+func _order_text(o) -> String:
+	var lines := []
+	for entry in o["items"]:
+		lines.append("· " + _req_text(entry))
+	if not Data.RECIPES[o["recipe"]]["sauces"].is_empty():
+		lines.append("· " + (o["sauce"] if o["sauce"] != "" else "sin salsa"))
+	for t in o["toppings"]:
+		lines.append("+ " + t)
+	return "\n".join(PackedStringArray(lines))
+
+
+func _plate_text(o) -> String:
+	if o["plate"].is_empty() and o["plate_toppings"].is_empty() and o["plate_sauce"] == "":
+		return "(vacío)"
+	var lines := []
+	for e in o["plate"]:
+		lines.append("· " + e["label"])
+	lines.append("· " + (o["plate_sauce"] if o["plate_sauce"] != "" else "sin salsa"))
+	for t in o["plate_toppings"]:
+		lines.append("+ " + t)
+	return "\n".join(PackedStringArray(lines))
+
+
+# =====================================================================
+# Utilidades
+# =====================================================================
+
+func _unlocked_items(kind: String) -> Array:
+	var out := []
+	for r in recipes:
+		for part in Data.RECIPES[r]["parts"]:
+			for id in part:
+				if Data.ITEMS[id]["kind"] == kind and not id in out:
+					out.append(id)
+	return out
+
+
+func _cat_options(cat: String, field: String) -> Array:
+	var out := []
+	for r in recipes:
+		var rec: Dictionary = Data.RECIPES[r]
+		if rec["cat"] != cat:
+			continue
+		for opt in rec[field]:
+			if opt != "Sin salsa" and not opt in out:
+				out.append(opt)
+	return out
+
+
+func _get_order(id: int):
+	for o in orders:
+		if o["id"] == id:
+			return o
+	return null
+
+
+func _pick(arr: Array):
+	return arr[rng.randi() % arr.size()]
+
+
+func _painter(rect: Rect2, fn: Callable, animate := false, parent: Node = null) -> Control:
+	var p := Painter.new()
+	p.position = rect.position
+	p.size = rect.size
+	p.fn = fn
+	p.animate = animate
+	(parent if parent != null else station_box).add_child(p)
+	return p
+
+
+func _prop(rect: Rect2) -> Control:
+	var b := PropButton.new()
+	b.position = rect.position
+	b.size = rect.size
+	station_box.add_child(b)
+	return b
+
+
+func _tag(text: String, pos: Vector2, fsize := 16) -> Label:
+	var l := _label(text, fsize)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.12, 0.09, 0.07, 0.82)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	sb.content_margin_top = 3
+	sb.content_margin_bottom = 3
+	l.add_theme_stylebox_override("normal", sb)
+	l.position = pos
+	station_box.add_child(l)
+	return l
+
+
+func _card(rect: Rect2, text: String, fsize := 16) -> Label:
+	var l := _label(text, fsize, COL_INK)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = COL_PAPER
+	sb.set_corner_radius_all(6)
+	sb.set_content_margin_all(14)
+	sb.shadow_color = Color(0, 0, 0, 0.3)
+	sb.shadow_size = 4
+	sb.shadow_offset = Vector2(3, 4)
+	l.add_theme_stylebox_override("normal", sb)
+	l.position = rect.position
+	l.size = rect.size
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.clip_text = true
+	station_box.add_child(l)
+	return l
+
+
+func _label_at(text: String, pos: Vector2, fsize: int, color: Color) -> Label:
+	var l := _label(text, fsize, color)
+	l.position = pos
+	station_box.add_child(l)
+	return l
+
+
+func _paper_card(min_size: Vector2) -> PanelContainer:
+	var card := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = COL_PAPER
+	sb.set_corner_radius_all(10)
+	sb.set_content_margin_all(26)
+	sb.border_color = Color("c9a86a")
+	sb.set_border_width_all(3)
+	sb.shadow_color = Color(0, 0, 0, 0.4)
+	sb.shadow_size = 10
+	sb.shadow_offset = Vector2(4, 6)
+	card.add_theme_stylebox_override("panel", sb)
+	card.custom_minimum_size = min_size
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
+	card.add_child(box)
+	return card
+
+
+func _open_overlay() -> VBoxContainer:
+	_close_overlay()
+	var bg := ColorRect.new()
+	bg.color = Color(0.08, 0.06, 0.05, 0.82)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
+	overlay = bg
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.add_child(center)
+	var card := _paper_card(Vector2(560, 0))
+	center.add_child(card)
+	return card.get_child(0)
+
+
+func _close_overlay() -> void:
+	if overlay != null:
+		overlay.queue_free()
+		overlay = null
+
+
+func _clear(node: Node) -> void:
+	for c in node.get_children():
+		node.remove_child(c)
+		c.queue_free()
+
+
+func _spacer(h: float) -> Control:
+	var c := Control.new()
+	c.custom_minimum_size = Vector2(0, h)
+	return c
+
+
+func _label(text: String, size := 20, color := Color.WHITE, outline := 0) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	if outline > 0:
+		l.add_theme_constant_override("outline_size", outline)
+		l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	return l
+
+
+func _button(text: String, cb: Callable, size := 20) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.focus_mode = Control.FOCUS_NONE   # así la barra espaciadora no "aprieta" botones
+	b.add_theme_font_size_override("font_size", size)
+	b.pressed.connect(cb)
+	return b
