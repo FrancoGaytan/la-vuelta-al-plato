@@ -19,6 +19,10 @@ func _init() -> void:
 
 
 func _process(_delta: float) -> void:
+	# Animación de la pala al girar una pizza
+	for s in slots:
+		if s != null and s.has("rot"):
+			s["rot_vis"] = lerpf(s.get("rot_vis", 0.0), s["rot"], 0.25)
 	queue_redraw()
 
 
@@ -34,6 +38,8 @@ func _center(i: int) -> Vector2:
 			return [Vector2(64, 76), Vector2(172, 76), Vector2(64, 210), Vector2(172, 210)][i]
 		"freidora":
 			return Vector2(_vat_x(i), _basket_y(i) + 40)
+		"horno_lena":
+			return [Vector2(44, 236), Vector2(118, 246), Vector2(192, 236)][i]
 	return Vector2(64, 108 + i * 84)
 
 
@@ -55,6 +61,8 @@ func _food_rect(i: int) -> Rect2:
 			return Rect2(c - Vector2(40, 40), Vector2(80, 80))
 		"freidora":
 			return Rect2(c - Vector2(36, 32), Vector2(72, 64))
+	if kind == "horno_lena":
+		return Rect2(c - Vector2(34, 34), Vector2(68, 68))
 	return Rect2(c - Vector2(34, 32), Vector2(68, 64))
 
 
@@ -67,6 +75,8 @@ func _chip_rect(i: int) -> Rect2:
 			return Rect2(c.x - 50, c.y + 44, 100, 30)
 		"freidora":
 			return Rect2(c.x - 50, _basket_y(i) + 76, 100, 28)
+	if kind == "horno_lena":
+		return Rect2(c.x - 37, 282, 74, 30)
 	return Rect2(108, c.y - 15, 104, 30)
 
 
@@ -78,6 +88,8 @@ func _hit_rect(i: int) -> Rect2:
 			return Rect2(_center(i) - Vector2(50, 48), Vector2(100, 124))
 		"freidora":
 			return Rect2(_vat_x(i) - 52, _basket_y(i), 104, 108)
+	if kind == "horno_lena":
+		return Rect2(_center(i).x - 37, 198, 74, 116)
 	return Rect2(20, _center(i).y - 40, 196, 82)
 
 
@@ -91,6 +103,14 @@ func _gui_input(event: InputEvent) -> void:
 	var i := _slot_at(mb.position)
 	if i >= 0:
 		accept_event()
+		if kind == "horno_lena" and not _chip_rect(i).has_point(mb.position):
+			# Tocar la pizza: se gira con la pala (la otra mitad pasa a mirar al fuego)
+			var s: Dictionary = slots[i]
+			var ta: float = s["ta"]
+			s["ta"] = s["tb"]
+			s["tb"] = ta
+			s["rot"] = s.get("rot", 0.0) + PI
+			return
 		slot_clicked.emit(i)
 
 
@@ -115,6 +135,7 @@ func _draw() -> void:
 		"plancha": _draw_griddle(t)
 		"freidora": _draw_fryer(t)
 		"horno": _draw_oven(t)
+		"horno_lena": _draw_wood_oven(t)
 	for i in slots.size():
 		if slots[i] != null:
 			_draw_chip(_chip_rect(i), slots[i], t)
@@ -162,7 +183,73 @@ func _drop_data(_at: Vector2, data: Variant) -> void:
 
 
 func _burning(s) -> bool:
+	if s.has("ta"):
+		return maxf(s["ta"], s["tb"]) >= s["burn"] - 3.0
 	return s["t"] >= s["burn"] - 3.0
+
+
+## Horno de leña: cúpula de ladrillos, fuego a la izquierda y las pizzas sobre la piedra
+func _draw_wood_oven(t: float) -> void:
+	# Base de piedra
+	Art.rrect(self, Rect2(0, 186, 236, 144), Color("8d8478"), 10, Color("6b6358"), 3)
+	for k in 6:
+		draw_line(Vector2(6, 210 + k * 20), Vector2(230, 210 + k * 20), Color(0, 0, 0, 0.12), 2)
+	# Cúpula de ladrillos
+	var dome := PackedVector2Array()
+	for k in 33:
+		var a := PI + PI * k / 32.0
+		dome.append(Vector2(118, 196) + Vector2(cos(a) * 116, sin(a) * 170))
+	draw_colored_polygon(dome, Color("b35a3a"))
+	for row in 8:
+		var y := 196.0 - row * 21.0
+		var half := sqrt(maxf(0.0, 1.0 - pow((196.0 - y) / 170.0, 2.0))) * 116.0
+		draw_line(Vector2(118 - half, y), Vector2(118 + half, y), Color("8a3e26"), 2)
+		var off := 0.0 if row % 2 == 0 else 13.0
+		var x := 118 - half + off
+		while x < 118 + half:
+			draw_line(Vector2(x, y), Vector2(x, y - 21), Color("8a3e26"), 2)
+			x += 26.0
+	draw_polyline(dome, Color("6a2e1c"), 3, true)
+	# Chimenea con humo
+	draw_rect(Rect2(150, 8, 28, 40), Color("7a3a24"))
+	draw_rect(Rect2(146, 4, 36, 8), Color("5a2a1a"))
+	Art.steam(self, Vector2(164, 0), t, 1.0, 3, Color(0.75, 0.75, 0.75))
+	# Boca del horno: arco oscuro con el fuego adentro, a la izquierda
+	var mouth := PackedVector2Array()
+	for k in 25:
+		var a := PI + PI * k / 24.0
+		mouth.append(Vector2(118, 196) + Vector2(cos(a) * 92, sin(a) * 96))
+	draw_colored_polygon(mouth, Color("1d1410"))
+	var any_on := false
+	for s in slots:
+		if s != null:
+			any_on = true
+	var glow := 0.25 + 0.08 * sin(t * 6.0) + (0.12 if any_on else 0.0)
+	draw_circle(Vector2(58, 168), 70, Color(1.0, 0.45, 0.1, glow * 0.5))
+	# Leños y llamas (el lado izquierdo es el que más calienta)
+	for k in 3:
+		Art.rrect(self, Rect2(Vector2(30 + k * 14, 172 - k * 4), Vector2(46, 11)), Color("5a3a22"), 5)
+	for k in 9:
+		var fx := 36.0 + k * 7.0
+		var h := 30.0 + 18.0 * absf(sin(t * 7.0 + k * 1.3))
+		draw_colored_polygon(PackedVector2Array([Vector2(fx - 7, 176), Vector2(fx, 176 - h), Vector2(fx + 7, 176)]), Color(1.0, 0.5 + 0.1 * sin(k), 0.1, 0.85))
+		draw_colored_polygon(PackedVector2Array([Vector2(fx - 3, 176), Vector2(fx, 176 - h * 0.55), Vector2(fx + 3, 176)]), Color(1.0, 0.9, 0.4, 0.9))
+	for k in 10:
+		draw_circle(Vector2(40 + fmod(k * 37.0, 120.0), 186 - fmod(t * 40.0 + k * 17.0, 60.0)), 1.4, Color(1.0, 0.6, 0.2, 0.8))
+	draw_polyline(mouth, Color("e0a070"), 4, true)
+	# Piso de piedra donde van las pizzas (la luz del fuego le pega del lado izquierdo)
+	Art.grad_rect(self, Rect2(6, 200, 224, 76), Color("cbbfa8"), Color("9a8e78"))
+	draw_rect(Rect2(6, 200, 100, 76), Color(1.0, 0.5, 0.15, 0.12 + 0.04 * sin(t * 6.0)))
+	for i in slots.size():
+		var s = slots[i]
+		if s == null:
+			Art.ellipse(self, _center(i) + Vector2(0, 4), Vector2(30, 10), Color(0, 0, 0, 0.12))
+			continue
+		var rect := _food_rect(i)
+		var rv: float = s.get("rot_vis", 0.0)
+		Art.draw_pizza(self, rect, s.get("pizza", {}), s["ta"], s["tb"], s["target"], s["burn"], rv)
+		Art.steam(self, rect.get_center() + Vector2(0, -18), t, 0.6 if not _burning(s) else 1.5, i + 4,
+			Color.WHITE if maxf(s["ta"], s["tb"]) < s["burn"] else Color(0.3, 0.3, 0.3))
 
 
 func _draw_stove(t: float) -> void:
@@ -466,6 +553,9 @@ func _draw_oven(t: float) -> void:
 
 
 func _draw_chip(rect: Rect2, s, time: float) -> void:
+	if s.has("ta"):
+		_draw_pizza_chip(rect, s, time)
+		return
 	var t: float = s["t"]
 	var target: float = s["target"]
 	var burn: float = s["burn"]
@@ -476,7 +566,7 @@ func _draw_chip(rect: Rect2, s, time: float) -> void:
 		border = Color("5ee06a")
 	Art.rrect(self, rect, Color(0, 0, 0, 0.75), 7, border, 2 if border.a > 0 else 0)
 	Art.text(self, rect.position + Vector2(6, 14), Data.ITEMS[s["item"]]["name"], 11, Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 52)
-	var reading := "%.1fs" % t
+	var reading := "%.1fs" % (t * Data.COOK_SLOW)   # segundos reales
 	if Data.ITEMS[s["item"]].has("temps"):
 		reading = "%d°C" % int(Data.temp_at(s["item"], t))   # las carnes se miden con el termómetro
 	Art.text(self, rect.position + Vector2(0, 14), reading, 13, Color("ffd166"), HORIZONTAL_ALIGNMENT_RIGHT, rect.size.x - 6)
@@ -504,3 +594,29 @@ func _draw_chip(rect: Rect2, s, time: float) -> void:
 		draw_circle(sc, 8, Color(0, 0, 0, 0.5))
 		draw_circle(sc, 7, col)
 		Art.text(self, sc + Vector2(-7, 4.5), "S", 11, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 14)
+
+
+## Cartel de la pizza: cómo va cada mitad; tocarlo la saca del horno
+func _draw_pizza_chip(rect: Rect2, s, time: float) -> void:
+	var ta: float = s["ta"]
+	var tb: float = s["tb"]
+	var target: float = s["target"]
+	var burn: float = s["burn"]
+	var border := Color(0, 0, 0, 0)
+	if maxf(ta, tb) >= burn - 3.0:
+		border = Color(1, 0.25, 0.15, 0.6 + 0.4 * sin(time * 12.0))
+	elif show_zone and absf(ta - target) <= Data.ZONE and absf(tb - target) <= Data.ZONE:
+		border = Color("5ee06a")
+	Art.rrect(self, rect, Color(0, 0, 0, 0.78), 7, border, 2 if border.a > 0 else 0)
+	var uneven := absf(ta - tb) > 2.0
+	Art.text(self, rect.position + Vector2(0, 12), "¡girala!" if uneven else "sacar", 11,
+		Color("ffd166") if uneven else Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_CENTER, rect.size.x)
+	# Una barrita por mitad (la de arriba es la que mira al fuego)
+	for h in 2:
+		var tt := ta if h == 0 else tb
+		var bar := Rect2(rect.position.x + 6, rect.position.y + 16 + h * 6, rect.size.x - 12, 4)
+		draw_rect(bar, Color("1e1916"))
+		var px := bar.size.x / burn
+		draw_rect(Rect2(bar.position, Vector2(minf(tt, burn) * px, bar.size.y)), Art._crust_color(tt, target, burn))
+		if show_zone:
+			draw_rect(Rect2(bar.position.x + maxf(target - Data.ZONE, 0.0) * px, bar.position.y - 1, Data.ZONE * 2.0 * px, bar.size.y + 2), Color(0.4, 1, 0.4), false, 1.0)

@@ -15,6 +15,7 @@ const SAUCE_COLORS := {
 	"Ketchup": Color("c4161c"), "Mayonesa": Color("fff2c2"), "Mostaza": Color("e8b923"),
 	"Oliva y limón": Color("d6cf5a"), "Vinagreta": Color("b88a3c"), "Oliva": Color("a8a53a"),
 	"Salsa de soja": Color("3b2414"),
+	"Tomate": Color("c8341f"), "Blanca": Color("f3ecd8"), "Pomodoro": Color("d23a22"), "Alfredo": Color("f5ecd0"),
 }
 
 # shape: cómo se dibuja cada topping sobre el plato
@@ -36,6 +37,14 @@ const TOPPINGS := {
 	"Dulce de leche": {"color": Color("8a4b1f"), "shape": "drizzle"},
 	"Crema": {"color": Color("fffaf0"), "shape": "dollop"},
 	"Azúcar": {"color": Color("ffffff"), "shape": "sugar"},
+	# Italia
+	"Mozzarella": {"color": Color("fbf8ee"), "shape": "blob"},
+	"Jamón": {"color": Color("e8a0a0"), "shape": "square"},
+	"Aceitunas": {"color": Color("2a2622"), "shape": "olive"},
+	"Champiñones": {"color": Color("dcc9a6"), "shape": "mushroom"},
+	"Pepperoni": {"color": Color("b8322a"), "shape": "disc"},
+	"Parmesano": {"color": Color("f3e4ac"), "shape": "flake"},
+	"Cacao": {"color": Color("5a3218"), "shape": "sugar"},
 }
 
 const SKINS := [Color("f9d7b9"), Color("f1c19a"), Color("d9a074"), Color("b97a4f"), Color("8d5a3b"), Color("6b4228")]
@@ -172,6 +181,9 @@ static func draw_cooking(ci: CanvasItem, id: String, rect: Rect2, t: float, targ
 
 ## Dibuja una preparación (cocida, cortada o de la despensa).
 static func draw_entry(ci: CanvasItem, e: Dictionary, rect: Rect2) -> void:
+	if e.get("item", "") == "pizza":
+		draw_pizza(ci, rect, e.get("pizza", {}), e.get("ta", 0.0), e.get("tb", 0.0), e.get("vtarget", 9.0), e.get("burn", 15.0), e.get("rot", 0.0))
+		return
 	if e.get("t", -1.0) >= 0.0:
 		draw_cooking(ci, e["item"], rect, e["t"], e["vtarget"], e["burn"])
 	else:
@@ -298,6 +310,10 @@ static func sprinkle_rate(name: String) -> Array:
 	match shape:
 		"leaf":
 			return [0.14, 16]
+		"blob":
+			return [0.1, 18]
+		"olive", "disc", "mushroom":
+			return [0.16, 12]
 		"slice", "square", "strip":
 			return [0.32, 6]
 		"egg":
@@ -405,6 +421,26 @@ static func draw_topping_piece(ci: CanvasItem, p: Vector2, k: float, col: Color,
 		"sugar":
 			for s in 4:
 				ci.draw_circle(p + Vector2(rng.randf_range(-3, 3), rng.randf_range(-3, 3)) * k, 0.8 * k, Color(col, 0.9))
+		"blob":
+			# Mozzarella: manchón blanco irregular (se dora en el horno)
+			draw_sauce(ci, p, 8 * k * v, col, rng.randi())
+			ci.draw_circle(p + Vector2(-2, -2) * k, 2.5 * k, Color(1, 1, 1, 0.8))
+		"olive":
+			ci.draw_circle(p, 5 * k * v, col)
+			ci.draw_circle(p, 2 * k * v, Color("4a3a2a"))
+			ci.draw_circle(p + Vector2(-1.5, -1.5) * k, 1.2 * k, Color(1, 1, 1, 0.5))
+		"disc":
+			# Pepperoni: rodaja roja con puntitos de grasa
+			ci.draw_circle(p, 7 * k * v, col.darkened(0.2))
+			ci.draw_circle(p, 6 * k * v, col)
+			for s in 4:
+				ci.draw_circle(p + Vector2(rng.randf_range(-3.5, 3.5), rng.randf_range(-3.5, 3.5)) * k, 0.9 * k, Color("f2c9b8"))
+		"mushroom":
+			ci.draw_set_transform(p, rng.randf() * TAU, Vector2.ONE)
+			ellipse(ci, Vector2(0, -2) * k, Vector2(6, 4) * k * v, col)
+			ci.draw_rect(Rect2(Vector2(-1.8, -1) * k, Vector2(3.6, 6) * k * v), col.lightened(0.15))
+			ci.draw_arc(Vector2(0, -2) * k, 6 * k * v, PI, TAU, 8, col.darkened(0.3), 1.0)
+			ci.draw_set_transform(Vector2.ZERO, 0, Vector2.ONE)
 		_:
 			ci.draw_circle(p, (1.8 + rng.randf() * 1.4) * k, tone)
 
@@ -678,8 +714,127 @@ static func draw_topping_icon(ci: CanvasItem, c: Vector2, s: float, name: String
 				ci.draw_rect(Rect2(p - Vector2(5, 5) * u, Vector2(10, 10) * u), Color("9aa3ab"), false, 1.2)
 			for k in 10:
 				ci.draw_circle(c + Vector2(-12 + k * 2.6, 13 + (k % 2)) * u, 0.9 * u, Color("b8c0c8"))
+		"Mozzarella":
+			ci.draw_circle(c + Vector2(1, 2) * u, 13 * u, Color("c9c1a8"))
+			ci.draw_circle(c, 13 * u, Color("fbf8ee"))
+			ci.draw_circle(c + Vector2(-4, -4) * u, 4 * u, Color(1, 1, 1, 0.9))
+			ci.draw_arc(c, 13 * u, PI * 0.1, PI * 0.9, 10, Color("ddd5bf"), 1.5 * u)
+		"Jamón":
+			ci.draw_colored_polygon(PackedVector2Array([P.call(-14, -8), P.call(12, -12), P.call(15, 6), P.call(-10, 12)]), Color("e8a0a0"))
+			ci.draw_polyline(PackedVector2Array([P.call(-14, -8), P.call(12, -12), P.call(15, 6)]), Color("fbe6e0"), 2.5 * u)
+			ci.draw_colored_polygon(PackedVector2Array([P.call(-10, 12), P.call(15, 6), P.call(6, 14)]), Color("c87a7a"))
+		"Aceitunas":
+			for q in [[-6, 2], [6, -3]]:
+				var p: Vector2 = P.call(q[0], q[1])
+				ellipse(ci, p, Vector2(8, 6.5) * u, Color("2a2622"))
+				ellipse(ci, p, Vector2(3, 2.5) * u, Color("5a4a3a"))
+				ci.draw_circle(p + Vector2(-3, -3) * u, 1.5 * u, Color(1, 1, 1, 0.5))
+		"Champiñones":
+			ellipse(ci, P.call(0, -2), Vector2(14, 9) * u, Color("dcc9a6"))
+			ci.draw_arc(P.call(0, -2), 14 * u, PI, TAU, 14, Color("a88a62"), 1.5 * u)
+			Art_mush_stem(ci, P.call(0, 4), u)
+		"Pepperoni":
+			for q in [[-6, -3], [6, 2], [-1, 8]]:
+				var p: Vector2 = P.call(q[0], q[1])
+				ci.draw_circle(p, 7 * u, Color("8a2018"))
+				ci.draw_circle(p, 6 * u, Color("b8322a"))
+				for d in [[-2, -2], [2, 1], [-1, 3]]:
+					ci.draw_circle(p + Vector2(d[0], d[1]) * u, 0.9 * u, Color("f2c9b8"))
+		"Parmesano":
+			ci.draw_colored_polygon(PackedVector2Array([P.call(-14, 8), P.call(12, 8), P.call(12, -6), P.call(-14, 2)]), Color("f3e4ac"))
+			ci.draw_colored_polygon(PackedVector2Array([P.call(-14, 2), P.call(12, -6), P.call(15, -8), P.call(-11, -1)]), Color("e0c27a"))
+			for k in 6:
+				ci.draw_circle(P.call(-10 + k * 4, 12 + (k % 2)), 0.9 * u, Color("e8d89a"))
+		"Cacao":
+			ellipse(ci, P.call(0, 4), Vector2(14, 7) * u, Color("5a3218"))
+			ellipse(ci, P.call(0, 1), Vector2(9, 5) * u, Color("6e3e1e"))
+			ellipse(ci, P.call(7, -8), Vector2(5, 3) * u, Color("3a1e10"))
+			ci.draw_line(P.call(4, -8), P.call(10, -8), Color("6e3e1e"), 1.0)
 		_:
 			text(ci, c + Vector2(-s, 4), name.left(1), int(s * 0.6), INK, HORIZONTAL_ALIGNMENT_CENTER, s * 2)
+
+
+static func Art_mush_stem(ci: CanvasItem, p: Vector2, u: float) -> void:
+	rrect(ci, Rect2(p + Vector2(-4, -2) * u, Vector2(8, 10) * u), Color("f0e4cc"), 3 * u)
+
+
+# --- Italia: pizza y masa ---
+
+static func _crust_color(t: float, target: float, burn: float) -> Color:
+	if t < 0.0:
+		return Color("f1e2bc")       # masa cruda
+	if t >= burn:
+		return Color("3a2a20")
+	if t <= target:
+		return Color("f1e2bc").lerp(Color("e3a64a"), t / target)
+	return Color("e3a64a").lerp(Color("7a4a1e"), (t - target) / (burn - target))
+
+
+## Bollo de masa
+static func draw_dough(ci: CanvasItem, rect: Rect2) -> void:
+	var c := rect.get_center()
+	var r := minf(rect.size.x, rect.size.y) * 0.4
+	ellipse(ci, c + Vector2(2, r * 0.6), Vector2(r * 1.05, r * 0.35), Color(0, 0, 0, 0.18))
+	ellipse(ci, c, Vector2(r, r * 0.85), Color("e9d6a8"))
+	ellipse(ci, c + Vector2(-r * 0.2, -r * 0.25), Vector2(r * 0.55, r * 0.35), Color("f8ecd0"))
+	for k in 6:
+		ci.draw_circle(c + Vector2(cos(k * 2.0) * r * 0.6, sin(k * 1.3) * r * 0.5), 1.2, Color(1, 1, 1, 0.8))
+
+
+## Pizza vista desde arriba. pz = {stretch, sauce, sprinkles}. ta/tb = cocción de cada mitad (-1 = cruda).
+## La mitad "a" (izquierda) es la que mira al fuego. rot = cuánto se giró (para dibujar los ingredientes).
+static func draw_pizza(ci: CanvasItem, rect: Rect2, pz: Dictionary, ta := -1.0, tb := -1.0, target := 9.0, burn := 15.0, rot := 0.0) -> void:
+	var c := rect.get_center()
+	var stretch: float = pz.get("stretch", 1.0)
+	var r := minf(rect.size.x, rect.size.y) * 0.48 * (0.45 + 0.55 * stretch)
+	ci.draw_circle(c + Vector2(2, 4), r, Color(0, 0, 0, 0.22))
+	if stretch < 1.0 and ta < 0.0:
+		# Todavía es un bollo que se va estirando
+		ellipse(ci, c, Vector2(r, r * (0.95 - 0.05 * stretch)), Color("ead7aa"))
+		ellipse(ci, c + Vector2(-r * 0.2, -r * 0.25), Vector2(r * 0.5, r * 0.3), Color(1, 1, 1, 0.25))
+		return
+	# Cada mitad se dora según su cocción
+	for half in 2:
+		var tt := ta if half == 0 else tb
+		var col := _crust_color(tt, target, burn)
+		var pts := PackedVector2Array([c])
+		for k in 25:
+			var a := PI * 0.5 + PI * k / 24.0 + (PI if half == 1 else 0.0)
+			pts.append(c + Vector2.from_angle(a) * r)
+		ci.draw_colored_polygon(pts, col)
+	ci.draw_circle(c, r * 0.84, _crust_color(minf(ta, tb), target, burn).lerp(Color("f6e7c4"), 0.4))
+	var sauce: String = pz.get("sauce", "")
+	if sauce != "":
+		var sc: Color = SAUCE_COLORS.get(sauce, Color.WHITE)
+		ci.draw_circle(c, r * 0.8, sc.darkened(0.08))
+		ci.draw_circle(c, r * 0.76, sc)
+	# Ingredientes (giran con la pizza)
+	var sp: Dictionary = pz.get("sprinkles", {})
+	if not sp.is_empty():
+		# Se giran los puntos (no el lienzo: cada pieza usa su propia transformación)
+		var turned := {}
+		for name in sp:
+			var pts := []
+			for q in sp[name]["pts"]:
+				pts.append((q as Vector2).rotated(rot))
+			turned[name] = {"amount": sp[name]["amount"], "pts": pts}
+		draw_sprinkles(ci, c, r * 0.72, turned)
+	# Manchitas tostadas en el borde y gratinado cuando se cocina
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
+	for half in 2:
+		var tt := ta if half == 0 else tb
+		if tt <= target * 0.6:
+			continue
+		var amount := clampf((tt - target * 0.6) / (target * 0.6), 0.0, 1.0)
+		for k in int(14 * amount):
+			var a := PI * 0.5 + rng.randf() * PI + (PI if half == 1 else 0.0)
+			ci.draw_circle(c + Vector2.from_angle(a) * r * rng.randf_range(0.86, 0.97), rng.randf_range(1.5, 3.2), Color(0.25, 0.14, 0.06, 0.55))
+		if "Mozzarella" in sp:
+			for k in int(10 * amount):
+				var a := PI * 0.5 + rng.randf() * PI + (PI if half == 1 else 0.0)
+				ci.draw_circle(c + Vector2.from_angle(a) * r * rng.randf_range(0.1, 0.7), rng.randf_range(1.5, 3.5), Color(0.85, 0.55, 0.2, 0.45))
+	ci.draw_arc(c, r, 0, TAU, 40, Color(0.5, 0.3, 0.1, 0.4), 1.5)
 
 
 static func _leaf_icon(ci: CanvasItem, p: Vector2, length: float, angle: float, col: Color) -> void:

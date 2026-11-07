@@ -8,7 +8,8 @@ const ZONE := 0.75         # margen (segundos) alrededor del punto ideal de cocc
 # Lo que se pierde de la caja al tirar comida a la basura
 const WASTE_COST := {"cook": 3, "chop": 1, "ready": 2, "condiment": 1}
 
-const LEAVE_FACTOR := 2.0      # si esperan más que paciencia x esto, se van y abandonan el pedido
+const LEAVE_FACTOR := 2.3      # si esperan más que paciencia x esto, se van y abandonan el pedido
+const COOK_SLOW := 1.35       # ritmo de cocción: todo se cocina un 35% más lento que los tiempos de las recetas
 const SPRINKLE_TIME := 2.0   # segundos que hay que desparramar un topping sobre la comida
 
 # Salero: lo que va en la plancha o la olla (con "salt": true) se sala sacudiendo el salero encima.
@@ -69,8 +70,9 @@ const APPLIANCES := {
 	"plancha": {"name": "Plancha", "slots": 4},
 	"freidora": {"name": "Freidora", "slots": 4},
 	"horno": {"name": "Horno", "slots": 3},
+	"horno_lena": {"name": "Horno de leña", "slots": 3},   # Italia: la pizza se gira con la pala
 }
-const APPLIANCE_ORDER := ["olla", "plancha", "freidora", "horno"]
+const APPLIANCE_ORDER := ["olla", "plancha", "freidora", "horno", "horno_lena"]
 
 # kind: "cook" se cocina en un aparato (target = segundos ideales, burn = se quema)
 #       "chop" se corta en la tabla (cuts = cantidad de cortes)
@@ -105,6 +107,10 @@ const ITEMS := {
 	"cebolla": {"name": "Cebolla", "kind": "chop", "cuts": 5},
 	"pure": {"name": "Puré", "kind": "ready"},
 	"flan": {"name": "Flan", "kind": "ready"},
+	# Italia. "built": se arma en la mesa de pizza (no sale de la heladera)
+	"pizza": {"name": "Pizza", "kind": "cook", "where": "horno_lena", "target": 9.0, "burn": 15.0, "built": true},
+	"fettuccine": {"name": "Fettuccine", "kind": "cook", "where": "olla", "salt": true, "target": 5.0, "burn": 10.0},
+	"tiramisu": {"name": "Tiramisú", "kind": "ready"},
 }
 
 # parts: cada parte es una lista de opciones; el cliente elige una por parte.
@@ -138,6 +144,12 @@ const RECIPES := {
 		"sauces": [], "toppings": ["Dulce de leche", "Crema"], "min_toppings": 1},
 	"panqueques": {"name": "Panqueques", "cat": "Postres", "parts": [["panqueque"]],
 		"sauces": [], "toppings": ["Dulce de leche", "Crema", "Azúcar"], "min_toppings": 1},
+	# Italia. "prebuilt": la salsa y los ingredientes van en la mesa de pizza, antes del horno
+	"pizza": {"name": "Pizza", "cat": "Pizzas", "parts": [["pizza"]], "prebuilt": true, "min_toppings": 1,
+		"sauces": ["Tomate", "Blanca"], "toppings": ["Mozzarella", "Jamón", "Aceitunas", "Champiñones", "Pepperoni", "Albahaca"]},
+	"fettuccine": {"name": "Fettuccine", "cat": "Pasta fresca", "parts": [["fettuccine"]],
+		"sauces": ["Pomodoro", "Alfredo", "Pesto"], "toppings": ["Parmesano", "Albahaca"]},
+	"tiramisu": {"name": "Tiramisú", "cat": "Dolci", "parts": [["tiramisu"]], "sauces": [], "toppings": ["Cacao"], "min_toppings": 1},
 }
 
 # Cada día suma recetas nuevas al menú y sube la dificultad.
@@ -145,20 +157,30 @@ const RECIPES := {
 # show_zone: la barra de cocción marca el punto ideal (en los días difíciles hay que medir el tiempo)
 const LEVELS := [
 	{"name": "Día 1 · Primeros pasos", "new": ["spaghetti", "milanesa"], "customers": 4,
-		"interval": [16.0, 22.0], "patience": 95.0, "max_toppings": 1, "show_zone": true},
+		"interval": [16.0, 22.0], "patience": 100.0, "max_toppings": 1, "show_zone": true},
 	{"name": "Día 2 · A la plancha", "new": ["bife", "noquis"], "customers": 5,
-		"interval": [14.0, 20.0], "patience": 90.0, "max_toppings": 1, "show_zone": true},
+		"interval": [14.0, 20.0], "patience": 100.0, "max_toppings": 1, "show_zone": true},
 	{"name": "Día 3 · De la huerta", "new": ["ensalada", "pollo"], "customers": 6,
-		"interval": [13.0, 18.0], "patience": 85.0, "max_toppings": 2, "show_zone": true},
+		"interval": [13.0, 18.0], "patience": 105.0, "max_toppings": 2, "show_zone": true},
 	{"name": "Día 4 · A ojo de cocinero", "new": ["hamburguesa", "asadas", "ravioles"], "customers": 7,
-		"interval": [12.0, 17.0], "patience": 80.0, "max_toppings": 2, "show_zone": false},
+		"interval": [13.0, 18.0], "patience": 110.0, "max_toppings": 2, "show_zone": false},
 	{"name": "Día 5 · Dulce final", "new": ["wok", "flan"], "customers": 8,
-		"interval": [10.0, 15.0], "patience": 75.0, "max_toppings": 2, "show_zone": false},
+		"interval": [12.0, 17.0], "patience": 115.0, "max_toppings": 2, "show_zone": false},
 	{"name": "Día 6 · Lleno total", "new": ["panqueques"], "customers": 10,
-		"interval": [8.0, 13.0], "patience": 70.0, "max_toppings": 3, "show_zone": false},
+		"interval": [12.0, 17.0], "patience": 120.0, "max_toppings": 3, "show_zone": false},
 	# Desde el Día 7 cada pedido viene con bebida: se sirve desde la heladera del emplatado
 	{"name": "Día 7 · Con bebida", "new": [], "customers": 10, "drinks": true,
-		"interval": [9.0, 14.0], "patience": 72.0, "max_toppings": 3, "show_zone": false},
+		"interval": [12.0, 17.0], "patience": 125.0, "max_toppings": 3, "show_zone": false},
+]
+
+# Días de la Trattoria del Forno (Roma)
+const ITALY_LEVELS := [
+	{"name": "Giorno 1 · La pizzería", "new": ["pizza"], "customers": 5,
+		"interval": [18.0, 24.0], "patience": 110.0, "max_toppings": 2, "show_zone": true},
+	{"name": "Giorno 2 · Pasta fresca", "new": ["fettuccine", "tiramisu"], "customers": 6,
+		"interval": [15.0, 21.0], "patience": 110.0, "max_toppings": 2, "show_zone": true},
+	{"name": "Giorno 3 · Noche romana", "new": [], "customers": 8, "drinks": true,
+		"interval": [14.0, 19.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
 ]
 
 # =====================================================================
@@ -182,8 +204,8 @@ const COUNTRIES := {
 		"price": 1200, "stars_needed": 3, "ready": false, "levels": []},
 	"italia": {"name": "Italia", "city": "Roma", "restaurant": "Trattoria del Forno", "lon": 12.5, "lat": 41.9,
 		"flag": ["v", [Color("009246"), Color("ffffff"), Color("ce2b37")]],
-		"cuisine": "Pizza al horno de leña, pasta fresca y tiramisú", "cooking": "Horno de leña con pala y pasta amasada a mano",
-		"price": 600, "stars_needed": 1, "ready": false, "levels": []},
+		"cuisine": "Pizza al horno de leña, pasta fresca y tiramisú", "cooking": "Mesa de pizza y horno de leña con pala",
+		"price": 600, "stars_needed": 0, "ready": true, "levels": ITALY_LEVELS, "prep": "mesa"},
 	"francia": {"name": "Francia", "city": "París", "restaurant": "Le Petit Crêpier", "lon": 2.35, "lat": 48.85, "label_left": true,
 		"flag": ["v", [Color("0055a4"), Color("ffffff"), Color("ef4135")]],
 		"cuisine": "Crêpes, croissants y pastelería", "cooking": "Sartén de crêpes y decoración con manga",

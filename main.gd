@@ -11,6 +11,7 @@ const CustomerView = preload("res://views/customer_view.gd")
 const ApplianceView = preload("res://views/appliance_view.gd")
 const BoardView = preload("res://views/board_view.gd")
 const PlateView = preload("res://views/plate_view.gd")
+const MesaView = preload("res://views/pizza_mesa_view.gd")
 const TrashView = preload("res://views/trash_view.gd")
 const WorldMap = preload("res://views/world_map.gd")
 
@@ -108,6 +109,8 @@ var kitchen_views: Array = []        # aparatos dibujados en la cocina (para sab
 var salting := false
 var salt_cursor: Control = null
 var salt_sound_t := 0.0
+var mesa_pizza = null                # Italia: la pizza que se está armando en la mesa {stretch, sauce, sprinkles, plate_toppings}
+var mesa_view = null
 var pending_order: Dictionary = {}   # pedido que la moza está anotando
 var pending_timer := 0.0
 var waiter_look: Dictionary = {}
@@ -386,9 +389,13 @@ func _process(delta: float) -> void:
 			var slot = cookers[a][i]
 			if slot == null:
 				continue
-			var before: float = slot["t"]
-			slot["t"] += delta
-			if before < slot["target"] and slot["t"] >= slot["target"]:
+			var before: float = _doneness_progress(slot)
+			slot["t"] += delta / Data.COOK_SLOW     # la cocción avanza más lento que el reloj
+			if slot.has("ta"):
+				# Pizza en el horno de leña: la mitad que mira al fuego se cocina mucho más rápido
+				slot["ta"] += delta / Data.COOK_SLOW * 1.5
+				slot["tb"] += delta / Data.COOK_SLOW * 0.5
+			if before < slot["target"] and _doneness_progress(slot) >= slot["target"]:
 				if _has("timbre"):
 					_play_sfx("timbre")
 				if _has("ayudante"):
@@ -429,6 +436,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if key.keycode >= KEY_1 and key.keycode <= KEY_5:
 		_go_to_station(key.keycode - KEY_1)
+	elif key.keycode == KEY_SPACE and current_station == 2 and _uses_mesa():
+		_mesa_tap()
 	elif key.keycode == KEY_SPACE and current_station == 2:
 		_chop()
 
@@ -962,6 +971,7 @@ func _start_level(i: int) -> void:
 		cookers[a] = arr
 	board = null
 	prepared.clear()
+	mesa_pizza = null
 	pending_order = {}
 	selected_id = -1
 	current_station = 0
@@ -1240,12 +1250,38 @@ func _take_off(appliance: String, idx: int) -> void:
 		return
 	cookers[appliance][idx] = null
 	var t: float = slot["t"]
-	var label := "%s %.1fs" % [Data.ITEMS[slot["item"]]["name"], t]
+	if slot.has("ta"):
+		# Pizza: se lleva su armado y la cocción de cada mitad
+		var pz: Dictionary = slot["pizza"]
+		var burnt: bool = maxf(slot["ta"], slot["tb"]) >= slot["burn"]
+		var desc: String = pz.get("sauce", "")
+		if desc == "":
+			desc = "sin salsa"
+		prepared.append({"item": "pizza", "t": t, "ta": slot["ta"], "tb": slot["tb"], "vtarget": slot["target"],
+			"burn": slot["burn"], "pizza": pz, "rot": slot.get("rot", 0.0), "pantry": false, "chopped": false,
+			"label": "Pizza quemada" if burnt else "Pizza (%s)" % desc.to_lower()})
+		_refresh_all()
+		return
+	var label := "%s %.1fs" % [Data.ITEMS[slot["item"]]["name"], t * Data.COOK_SLOW]
 	if t >= slot["burn"]:
 		label = "%s quemado" % Data.ITEMS[slot["item"]]["name"]
 	prepared.append({"item": slot["item"], "t": t, "vtarget": slot["target"], "burn": slot["burn"],
 		"label": label, "pantry": false, "chopped": false, "salt": slot.get("salt", 0.0)})
 	_refresh_all()
+
+
+## Cuánto avanzó la cocción (para la pizza, la mitad que menos se cocinó)
+func _doneness_progress(slot: Dictionary) -> float:
+	if slot.has("ta"):
+		return minf(slot["ta"], slot["tb"])
+	return slot["t"]
+
+
+## Calidad de la cocción de una pizza: las dos mitades tienen que estar en su punto
+func _pizza_quality(e: Dictionary, target: float) -> float:
+	var qa := _cook_quality(e["ta"], target, e["burn"])
+	var qb := _cook_quality(e["tb"], target, e["burn"])
+	return minf(qa, qb) * 0.6 + (qa + qb) / 2.0 * 0.4
 
 
 func _cook_quality(t: float, target: float, burn: float) -> float:
@@ -1473,8 +1509,24 @@ func _sprinkle_full(t: String) -> void:
 		o["plate_toppings"].append(t)
 
 
+## Dónde se desparrama: en la mesa de pizza (Italia) o en el plato del pedido elegido
+func _sprinkle_data():
+	if current_station == 2 and mesa_pizza != null:
+		return mesa_pizza
+	return _get_order(selected_id)
+
+
+func _sprinkle_view():
+	if current_station == 2:
+		return mesa_view if mesa_view != null and is_instance_valid(mesa_view) else null
+	return plating_plate if plating_plate != null and is_instance_valid(plating_plate) else null
+
+
 func _start_sprinkle(t: String) -> void:
-	if _get_order(selected_id) == null or paused:
+	if _sprinkle_data() == null or paused:
+		return
+	if current_station == 2 and mesa_pizza != null and mesa_pizza["stretch"] < 1.0:
+		_hint("Primero estirá la masa (tocala varias veces)")
 		return
 	sprinkle_name = t
 	sprinkle_used = 0.0
@@ -1490,7 +1542,7 @@ func _start_sprinkle(t: String) -> void:
 
 
 func _draw_sprinkle_cursor(ci: CanvasItem, time: float) -> void:
-	var o = _get_order(selected_id)
+	var o = _sprinkle_data()
 	var amount := 0.0
 	if o != null and o["sprinkles"].has(sprinkle_name):
 		amount = o["sprinkles"][sprinkle_name]["amount"]
@@ -1519,9 +1571,10 @@ func _draw_sprinkle_cursor(ci: CanvasItem, time: float) -> void:
 
 
 func _sprinkle_over_food() -> bool:
-	if plating_plate == null or not is_instance_valid(plating_plate):
+	var v = _sprinkle_view()
+	if v == null:
 		return false
-	return plating_plate.rel_point(plating_plate.get_local_mouse_position()).length() <= 1.0
+	return v.rel_point(v.get_local_mouse_position()).length() <= 1.0
 
 
 func _update_sprinkle(delta: float) -> void:
@@ -1530,14 +1583,15 @@ func _update_sprinkle(delta: float) -> void:
 	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		_end_sprinkle()
 		return
-	var o = _get_order(selected_id)
-	if o == null or plating_plate == null or not is_instance_valid(plating_plate):
+	var o = _sprinkle_data()
+	var v = _sprinkle_view()
+	if o == null or v == null:
 		_end_sprinkle()
 		return
 	sprinkle_cursor.position = get_global_mouse_position()
 	if not _sprinkle_over_food():
 		return
-	var rel: Vector2 = plating_plate.rel_point(plating_plate.get_local_mouse_position())
+	var rel: Vector2 = v.rel_point(v.get_local_mouse_position())
 	if not o["sprinkles"].has(sprinkle_name):
 		o["sprinkles"][sprinkle_name] = {"amount": 0.0, "pts": []}
 	var sp: Dictionary = o["sprinkles"][sprinkle_name]
@@ -1553,7 +1607,7 @@ func _update_sprinkle(delta: float) -> void:
 	if sp["amount"] >= 1.0 and not sprinkle_name in o["plate_toppings"]:
 		o["plate_toppings"].append(sprinkle_name)
 		_hint("¡Listo: %s!" % sprinkle_name)
-	plating_plate.queue_redraw()
+	v.queue_redraw()
 
 
 func _end_sprinkle() -> void:
@@ -1564,11 +1618,13 @@ func _end_sprinkle() -> void:
 	if sprinkle_cursor != null and is_instance_valid(sprinkle_cursor):
 		sprinkle_cursor.queue_free()
 	sprinkle_cursor = null
-	var o = _get_order(selected_id)
+	var o = _sprinkle_data()
 	if o != null and sprinkle_used <= 0.0:
 		# No lo pasó por la comida: si ya estaba puesto, el click lo saca; si no, se le explica
 		if t in o["plate_toppings"]:
-			_remove_topping(t)
+			o["plate_toppings"].erase(t)
+			o["sprinkles"].erase(t)
+			_refresh_all()
 			return
 		_hint("Mantené apretado el bowl y desparramalo arriba de la comida")
 	elif o != null and not t in o["plate_toppings"]:
@@ -1657,7 +1713,11 @@ func _deliver() -> void:
 				hits += 1
 				# La cocción se juzga contra el punto que pidió ESTE cliente
 				var q := 100.0
-				if e.get("t", -1.0) >= 0.0:
+				if e.has("ta"):
+					q = _pizza_quality(e, _target_for(o, e["item"]))
+					if e.get("pizza", {}).get("stretch", 0.0) < 1.0:
+						q *= 0.5      # la masa no estaba bien estirada
+				elif e.get("t", -1.0) >= 0.0:
 					q = _cook_quality(e["t"], _target_for(o, e["item"]), e["burn"])
 					q *= Data.salt_factor(e["item"], e.get("salt", 0.0))   # bien salado (o sin sal si no lleva)
 				qualities.append(q)
@@ -1671,10 +1731,20 @@ func _deliver() -> void:
 	if not qualities.is_empty():
 		s_cook /= qualities.size()
 
-	var s_sauce := 100.0 if o["plate_sauce"] == o["sauce"] else 0.0
+	var plate_sauce: String = o["plate_sauce"]
+	var put: Array = o["plate_toppings"]
+	if Data.RECIPES[o["recipe"]].get("prebuilt", false):
+		# Pizza: la salsa y los ingredientes son los que se pusieron en la mesa, antes del horno
+		plate_sauce = ""
+		put = []
+		for e in o["plate"]:
+			if e.get("item", "") == "pizza":
+				plate_sauce = e["pizza"].get("sauce", "")
+				put = e["pizza"].get("plate_toppings", [])
+				break
+	var s_sauce := 100.0 if plate_sauce == o["sauce"] else 0.0
 
 	var wanted: Array = o["toppings"]
-	var put: Array = o["plate_toppings"]
 	var union := {}
 	var top_hits := 0
 	for t in wanted:
@@ -1850,7 +1920,7 @@ func _update_tabs() -> void:
 			if s != null and s["t"] >= s["burn"] - 3.0:
 				smoking = true
 	for i in tab_buttons.size():
-		var txt := "%d · %s" % [i + 1, STATIONS[i]]
+		var txt := "%d · %s" % [i + 1, "Mesa" if i == 2 and _uses_mesa() else STATIONS[i]]
 		if i == 0 and not queue.is_empty():
 			txt += " (%d)" % queue.size()
 		if i == 1 and smoking:
@@ -1977,6 +2047,8 @@ func _refresh_station() -> void:
 	_clear(station_box)
 	customer_views.clear()
 	kitchen_views.clear()
+	mesa_view = null
+	mesa_view = null
 	plating_plate = null
 	take_button = null
 	board_view = null
@@ -1986,7 +2058,7 @@ func _refresh_station() -> void:
 	match current_station:
 		0: _build_orders_station()
 		1: _build_kitchen_station()
-		2: _build_board_station()
+		2: _build_mesa_station() if _uses_mesa() else _build_board_station()
 		3: _build_plating_station()
 		4: _build_delivery_station()
 	# Luz ambiente por encima de todo (no bloquea el mouse)
@@ -2149,7 +2221,8 @@ func _build_kitchen_station() -> void:
 	# Heladera con los ingredientes crudos: se arrastran hasta el aparato que corresponde
 	var fx := x + 4.0
 	var fw := STATION_SIZE.x - fx - 10.0
-	var n := cook_items.size()
+	var fridge_items := cook_items.filter(func(id): return not Data.ITEMS[id].get("built", false))   # la pizza se arma en la mesa
+	var n := fridge_items.size()
 	var cols := clampi(int(fw / 100.0), 1, maxi(n, 1))
 	var rows := int(ceil(n / float(cols)))
 	var cw := minf(fw / cols, 140.0)
@@ -2162,8 +2235,12 @@ func _build_kitchen_station() -> void:
 			var y := 26.0 + (r + 1) * ch
 			ci.draw_rect(Rect2(8, y - 4, fw - 16, 4), Color("c5ccd2"))
 	_painter(Rect2(fx, 30, fw, 430), draw_fridge, false)
+	if n == 0 and _uses_mesa():
+		var note := _label("Hoy en la cocina solo va el horno de leña.\n\nLa pizza se arma en la Mesa (tecla 3):\nestirás la masa, ponés salsa e ingredientes\ny la mandás al horno.", 18, Color(0.3, 0.32, 0.36))
+		note.position = Vector2(fx + 30, 150)
+		station_box.add_child(note)
 	for j in n:
-		var id: String = cook_items[j]
+		var id: String = fridge_items[j]
 		var b := _prop(Rect2(fx + (fw - cw * cols) / 2.0 + (j % cols) * cw, 58 + (j / cols) * ch, cw, ch - 6))
 		b.texture = Art.food_raw(id)
 		b.text = Data.ITEMS[id]["name"]
@@ -2249,7 +2326,7 @@ func _build_order_recipe(o, rect: Rect2) -> void:
 		var step := VBoxContainer.new()
 		step.add_theme_constant_override("separation", 0)
 		step.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		step.add_child(_label("%d. Al emplatar" % n, 12, COL_INK))
+		step.add_child(_label("%d. %s" % [n, "En la mesa (antes del horno)" if r.get("prebuilt", false) else "Al emplatar"], 12, COL_INK))
 		var l := _label("\n".join(PackedStringArray(fin)), 11, Color(0.3, 0.24, 0.18))
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		l.custom_minimum_size = Vector2(120, 0)
@@ -2278,13 +2355,15 @@ func _recipe_step(n: int, o, entry: Dictionary, compact: bool) -> Control:
 	match info["kind"]:
 		"cook":
 			var where: String = Data.APPLIANCES[info["where"]]["name"]
+			if id == "pizza":
+				where = "Mesa: estirar y armar · Horno de leña: girala"
 			if info.has("temps"):
 				var temp: int = info.get("target_temp", 0)
 				if entry["doneness"] != "":
 					temp = info["doneness_temp"][entry["doneness"]]
 				how = "%s · sacar a %d°C" % [where, temp]
 			else:
-				how = "%s · %d segundos" % [where, int(_target_for(o, id))]
+				how = "%s · %d segundos" % [where, int(round(_target_for(o, id) * Data.COOK_SLOW))]
 			if info.get("salt", false):
 				how += " · con sal"
 			elif info["where"] in ["plancha", "olla"]:
@@ -2324,8 +2403,142 @@ func _toggle_recipes() -> void:
 	close.position = Vector2(420, 350)
 
 
+# --- 3 (Italia). Mesa de pizza ---
+
+func _uses_mesa() -> bool:
+	return Data.COUNTRIES[current_country].get("prep", "") == "mesa"
+
+
+func _build_mesa_station() -> void:
+	var draw_bg := func(ci, _t): Art.draw_wood_counter(ci, Rect2(Vector2.ZERO, STATION_SIZE))
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
+	var o = _get_order(selected_id)
+	var head := "Mesa de pizza  ·  estirá la masa, poné salsa e ingredientes y mandala al horno de leña"
+	if o != null:
+		var tops_o: Array = o["toppings"]
+		head = "Ticket #%d %s: %s%s" % [o["id"], o["name"], Data.RECIPES[o["recipe"]]["name"],
+			(" con " + o["sauce"].to_lower()) if o["sauce"] != "" else ""]
+		if not tops_o.is_empty():
+			head += " + " + ", ".join(PackedStringArray(tops_o))
+	_tag(head, Vector2(12, 4), 15)
+	# Izquierda: bollos de masa
+	_tag("Masa", Vector2(24, 44), 15)
+	var dough := _prop(Rect2(20, 74, 150, 130))
+	dough.draw_fn = func(ci, r): Art.draw_dough(ci, r)
+	dough.text = "Bollo de masa"
+	dough.text_size = 14
+	dough.drag_data = {"kind": "dough"}
+	dough.tooltip_text = "Arrastralo a la mesa (o tocalo)"
+	dough.pressed.connect(_mesa_place_dough)
+	if mesa_pizza != null:
+		var drop := _button("Tirar la masa", _mesa_discard, 14)
+		drop.position = Vector2(30, 230)
+		station_box.add_child(drop)
+	# Centro: la mesa con la pizza
+	mesa_view = MesaView.new()
+	mesa_view.position = Vector2(200, 40)
+	mesa_view.size = Vector2(440, 420)
+	mesa_view.pizza = mesa_pizza
+	mesa_view.tapped.connect(_mesa_tap)
+	mesa_view.dropped.connect(_mesa_drop)
+	station_box.add_child(mesa_view)
+	# Derecha: salsas, ingredientes y el horno
+	var x0 := 680.0
+	_tag("Salsa (arrastrala a la masa)", Vector2(x0, 44), 15)
+	var sauces := _cat_options("Pizzas", "sauces")
+	for k in sauces.size():
+		var s: String = sauces[k]
+		var b := _prop(Rect2(x0 + k * 90, 74, 84, 96))
+		var col: Color = Art.SAUCE_COLORS.get(s, Color.WHITE)
+		b.draw_fn = func(ci, rr): Art.draw_bottle(ci, rr, col)
+		b.text = s
+		b.text_size = 11
+		b.selected = mesa_pizza != null and mesa_pizza["sauce"] == s
+		b.drag_data = {"kind": "sauce", "name": s}
+		b.pressed.connect(_hint.bind("Arrastrá la salsa hasta la masa"))
+	_tag("Ingredientes (mantené y desparramá)", Vector2(x0, 182), 15)
+	var tops := _cat_options("Pizzas", "toppings")
+	for k in tops.size():
+		var tname: String = tops[k]
+		var b := _prop(Rect2(x0 + (k % 6) * 88, 212 + (k / 6) * 88, 84, 84))
+		b.draw_fn = func(ci, rr): Art.draw_bowl(ci, rr, tname)
+		b.selected = mesa_pizza != null and tname in mesa_pizza["plate_toppings"]
+		b.mouse_default_cursor_shape = Control.CURSOR_DRAG
+		b.tooltip_text = "%s: mantené apretado y pasalo por arriba de la masa" % tname
+		b.held.connect(_start_sprinkle.bind(tname))
+	var oven := _button("¡Al horno de leña!", _mesa_to_oven, 22)
+	oven.position = Vector2(x0 + 150, 400)
+	oven.custom_minimum_size = Vector2(280, 54)
+	oven.disabled = mesa_pizza == null or mesa_pizza["stretch"] < 1.0
+	station_box.add_child(oven)
+
+
+func _mesa_place_dough() -> void:
+	if mesa_pizza != null:
+		_hint("Ya hay una masa en la mesa")
+		return
+	mesa_pizza = {"stretch": 0.0, "sauce": "", "sprinkles": {}, "plate_toppings": []}
+	_refresh_station()
+
+
+func _mesa_tap() -> void:
+	if mesa_pizza == null:
+		_hint("Arrastrá un bollo de masa a la mesa")
+		return
+	if mesa_pizza["stretch"] >= 1.0:
+		return
+	mesa_pizza["stretch"] = minf(1.0, mesa_pizza["stretch"] + 1.0 / 6.0)
+	if mesa_pizza["stretch"] > 0.99:
+		mesa_pizza["stretch"] = 1.0     # sin errores de redondeo: 6 toques = estirada
+	_play_sfx("corte%d" % (rng.randi() % 3 + 1), -4.0)
+	if mesa_view != null and is_instance_valid(mesa_view):
+		mesa_view.bump()
+	if mesa_pizza["stretch"] >= 1.0:
+		_hint("¡Masa estirada! Ahora la salsa y los ingredientes")
+		_refresh_station()
+
+
+func _mesa_drop(data: Dictionary) -> void:
+	match data["kind"]:
+		"dough":
+			_mesa_place_dough()
+		"sauce":
+			if mesa_pizza == null or mesa_pizza["stretch"] < 1.0:
+				_hint("Primero estirá la masa")
+				return
+			mesa_pizza["sauce"] = data["name"]
+			_refresh_station()
+
+
+func _mesa_to_oven() -> void:
+	if mesa_pizza == null or mesa_pizza["stretch"] < 1.0:
+		return
+	var slots: Array = cookers["horno_lena"]
+	var idx := slots.find(null)
+	if idx == -1:
+		_hint("El horno de leña está lleno")
+		return
+	var info: Dictionary = Data.ITEMS["pizza"]
+	slots[idx] = {"item": "pizza", "t": 0.0, "ta": 0.0, "tb": 0.0, "target": info["target"], "burn": info["burn"],
+		"pizza": mesa_pizza, "rot": 0.0, "rot_vis": 0.0}
+	mesa_pizza = null
+	_hint("¡Al horno! Girala con la pala a mitad de cocción")
+	_refresh_all()
+
+
+func _mesa_discard() -> void:
+	if mesa_pizza == null:
+		return
+	mesa_pizza = null
+	money -= Data.WASTE_COST["ready"]
+	_hint("Tiraste la masa: -$%d de la caja" % Data.WASTE_COST["ready"])
+	_refresh_all()
+
+
 func _cook_time_text(id: String) -> String:
 	var info: Dictionary = Data.ITEMS[id]
+	if id == "pizza":
+		return "Pizza: %ds en el horno de leña (girala a la mitad)" % int(round(info["target"] * Data.COOK_SLOW * 1.0))
 	if info.has("doneness_temp"):
 		var parts := []
 		for dn in info["doneness_temp"]:
@@ -2333,7 +2546,7 @@ func _cook_time_text(id: String) -> String:
 		return "%s: %s" % [info["name"], " · ".join(PackedStringArray(parts))]
 	if info.has("target_temp"):
 		return "%s: %d°C (termómetro)" % [info["name"], int(info["target_temp"])]
-	return "%s: %ds" % [info["name"], int(info["target"])]
+	return "%s: %ds" % [info["name"], int(round(info["target"] * Data.COOK_SLOW))]
 
 
 # --- 3. Tabla ---
@@ -2460,7 +2673,8 @@ func _build_plating_station() -> void:
 	# Derecha: salsas y toppings del mismo tipo de plato
 	var x0 := 806.0 if drinks else 846.0
 	var y := 42.0
-	var sauces := _cat_options(r["cat"], "sauces")
+	var prebuilt: bool = r.get("prebuilt", false)   # la pizza ya viene con salsa e ingredientes de la mesa
+	var sauces := [] if prebuilt else _cat_options(r["cat"], "sauces")
 	if not sauces.is_empty():
 		_tag("Salsas (arrastrá al plato)", Vector2(x0, y), 15)
 		var opts := [""] + sauces
@@ -2481,7 +2695,9 @@ func _build_plating_station() -> void:
 				b.tooltip_text = "Arrastrá la salsa hasta el plato"
 				b.pressed.connect(_on_condiment_click.bind("sauce", s))
 		y += 30 + ceil(opts.size() / 4.0) * 92 + 4
-	var tops := _cat_options(r["cat"], "toppings")
+	var tops := [] if prebuilt else _cat_options(r["cat"], "toppings")
+	if prebuilt:
+		_tag("La pizza ya viene armada de la mesa", Vector2(x0, y), 15)
 	if not tops.is_empty():
 		_tag("Toppings (mantené y desparramá)", Vector2(x0, y), 15)
 		for k in tops.size():
