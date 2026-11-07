@@ -141,6 +141,7 @@ var tool_uses_left := {}              # utensilio en uso -> cuántos usos le que
 var tool_clean_now := {}              # si el que está en uso salió limpio
 var tool_last := false
 var closing := false                  # ya se atendió a todos: falta lavar y cerrar
+var closing_t := 0.0                  # segundos que quedan para lavar antes de que cierre solo
 var close_button: Button = null
 var mesa_pizza = null                # Italia: la pizza que se está armando en la mesa {stretch, sauce, sprinkles, plate_toppings}
 var mesa_view = null
@@ -746,15 +747,24 @@ func _process(delta: float) -> void:
 	_update_ticket_texts()
 
 	if spawned >= level["customers"] and queue.is_empty() and orders.is_empty():
-		# Ya no queda nadie: se cierra solo cuando no queda nada sucio (o con el botón)
+		# Ya no queda nadie: hay CLEANUP_TIME segundos para lavar lo que quedó (así conviene lavar
+		# mientras se cocina). Cierra solo al terminar de lavar, al acabarse el tiempo o con el botón.
 		if _dirty_count() == 0:
 			_finish_level()
 		elif not closing:
 			closing = true
-			_hint("¡Atendiste a todos! Lavá lo que quedó y el local cierra solo, o cerralo ya (lo sucio baja la reputación)")
+			closing_t = Data.CLEANUP_TIME
+			_play_sfx("timbre")
+			_hint("¡Atendiste a todos! Tenés %d segundos para lavar lo que quedó: lo sucio al cerrar baja la reputación" % int(Data.CLEANUP_TIME))
+		else:
+			closing_t -= delta
+			if closing_t <= 0.0:
+				_hint("¡Se acabó el tiempo! Se cierra el local")
+				_finish_level()
 		if closing and close_button != null:
 			close_button.visible = playing
-			close_button.text = "Cerrar el local (%d sin lavar)" % _dirty_count()
+			close_button.text = "Cerrar ya · %ds · %d sin lavar" % [int(ceil(maxf(closing_t, 0.0))), _dirty_count()]
+			close_button.add_theme_color_override("font_color", Color("c0281a") if closing_t <= 10.0 else COL_INK)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1270,7 +1280,7 @@ func _show_intro(i: int) -> void:
 			"3. Tabla: arrastrá la verdura hasta la tabla y cortala (click en la tabla o barra espaciadora).\n" + \
 			"4. Emplatado: arrastrá al plato lo de la bandeja y la salsa. Los toppings se desparraman: mantené el bowl apretado sobre la comida.\n" + \
 			"5. Entrega: tocá la campanita para servir.\n" + \
-			"6. Bacha: los platos (y, con el uso, ollas, espátulas y tablas) quedan sucios. Detergente a la esponja, frotá las manchas, enjuagá y al escurridor. Al final del día lavá lo que quedó: lo sucio al cerrar baja la reputación.\n" + \
+			"6. Bacha: los platos (y, con el uso, ollas, espátulas y tablas) quedan sucios. Detergente a la esponja, frotá las manchas, enjuagá y al escurridor. Cuando se va el último cliente tenés 30 s para lavar lo que quedó (lo sucio al cerrar baja la reputación): conviene lavar mientras se cocina.\n" + \
 			"Click en un ticket para elegir con qué pedido trabajás. Teclas 1 a 6: cambiar de estación.\n\n" + tip
 	var tl := _label(tip, 14, COL_INK)
 	tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

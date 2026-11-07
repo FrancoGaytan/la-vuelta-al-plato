@@ -37,6 +37,7 @@ const TOOL_FOR := {"olla": "olla", "plancha": "espatula", "freidora": "canasto",
 const DIRTY_FOOD := 0.8       # cocinar con un utensilio sucio: la comida vale 80%
 const DIRTY_PLATE := 0.75     # servir en plato sucio: el plato vale 75%
 const DIRTY_REPUTATION := 2.5 # al cerrar, cada cosa sin lavar baja la reputación del día (máximo 30)
+const CLEANUP_TIME := 30.0  # al irse el último cliente, segundos para terminar de lavar antes de cerrar
 
 # Salero: lo que va en la plancha o la olla (con "salt": true) se sala sacudiendo el salero encima.
 # 1.0 = bien salado (≈1 segundo de sacudir). Entre SALT_OK.x y SALT_OK.y está perfecto.
