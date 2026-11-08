@@ -961,7 +961,7 @@ static func arc_text(ci: CanvasItem, c: Vector2, radius: float, s: String, fsize
 
 ## Logo de "La Vuelta al Plato": un plato-globo terráqueo que gira, con gorro de chef,
 ## cubiertos cruzados, vapor y una cinta con el nombre en curva.
-static func draw_logo(ci: CanvasItem, c: Vector2, s: float, time: float) -> void:
+static func draw_logo(ci: CanvasItem, c: Vector2, s: float, time: float, steam := true) -> void:
 	# Cubiertos cruzados detrás del plato
 	for side in [-1, 1]:
 		ci.draw_set_transform(c, side * 0.55, Vector2.ONE)
@@ -1013,8 +1013,8 @@ static func draw_logo(ci: CanvasItem, c: Vector2, s: float, time: float) -> void
 	ci.draw_line(c + Vector2(-g, 0), c + Vector2(g, 0), Color(1, 1, 1, 0.25), 1.5 * s)
 	ci.draw_arc(c, g, 0, TAU, 64, Color("2a6a92"), 3 * s)
 	ci.draw_arc(c, g * 0.98, PI * 1.05, PI * 1.5, 16, Color(1, 1, 1, 0.5), 3 * s)
-	# Vapor que sale del plato
-	for k in 3:
+	# Vapor que sale del plato (el ícono va sin vapor: sobre fondo transparente se ve gris)
+	for k in (3 if steam else 0):
 		var ph := fmod(time * 0.5 + k / 3.0, 1.0)
 		var sx := c.x + (k - 1) * 40 * s + sin(ph * 6.0 + k) * 8 * s
 		ci.draw_arc(Vector2(sx, c.y - r - 20 * s - ph * 50 * s), 10 * s, PI * 0.5, PI * 1.5, 10, Color(1, 1, 1, 0.6 * (1.0 - ph)), 4 * s)
