@@ -1497,6 +1497,9 @@ static func draw_drink(ci: CanvasItem, rect: Rect2, name: String, drinks: Dictio
 	var c := rect.get_center()
 	var h := rect.size.y * 0.9
 	var w := minf(rect.size.x * 0.55, h * 0.42)
+	if d["kind"] == "vino":
+		draw_wine_glass(ci, Rect2(c.x - h * 0.3, c.y - h / 2.0, h * 0.6, h), 1.0, 0.0)
+		return
 	ellipse(ci, Vector2(c.x + 2, c.y + h / 2.0), Vector2(w * 0.6, 4), Color(0, 0, 0, 0.22))
 	if d["kind"] == "lata":
 		var body := Rect2(c.x - w / 2.0, c.y - h * 0.38, w, h * 0.84)
@@ -1514,6 +1517,144 @@ static func draw_drink(ci: CanvasItem, rect: Rect2, name: String, drinks: Dictio
 		rrect(ci, Rect2(c.x - w * 0.22, c.y - h * 0.48, w * 0.44, 6), d["label"], 2)
 		ci.draw_rect(Rect2(body.position.x, body.get_center().y - 5, w, 12), d["label"])
 		ci.draw_rect(Rect2(body.position.x + w * 0.18, body.position.y + 5, 3, body.size.y - 14), Color(1, 1, 1, 0.45))
+
+
+# =====================================================================
+# Vino: copa de cristal y botella
+# =====================================================================
+
+const WINE := Color("6e0f22")
+const WINE_IDEAL_U := 0.36      # la parte más ancha de la copa (0 = borde, 1 = fondo del cáliz)
+const WINE_RIM_FILL := 1.55     # con este nivel llega al borde y se derrama
+
+## Contorno de una elipse (o un tramo, de a0 a a1)
+static func ellipse_arc(ci: CanvasItem, c: Vector2, radii: Vector2, a0: float, a1: float, color: Color, width := 1.0) -> void:
+	var pts := PackedVector2Array()
+	for k in 33:
+		var a := lerpf(a0, a1, k / 32.0)
+		pts.append(c + Vector2(cos(a) * radii.x, sin(a) * radii.y))
+	ci.draw_polyline(pts, color, width, true)
+
+
+## Medio ancho del cáliz (tulipa) a la altura u (0 = borde, 1 = fondo), en fracción del ancho máximo
+static func glass_halfw(u: float) -> float:
+	if u <= WINE_IDEAL_U:
+		return 0.84 + 0.16 * u / WINE_IDEAL_U          # se cierra un poco hacia el borde
+	var v := (u - WINE_IDEAL_U) / (1.0 - WINE_IDEAL_U)
+	return sqrt(maxf(0.0, 1.0 - v * v)) * 0.98 + 0.02
+
+
+## Nivel de vino (fill: 1 = hasta la parte más ancha) -> altura u de la superficie
+static func wine_surface_u(fill: float) -> float:
+	return clampf(1.0 - fill * (1.0 - WINE_IDEAL_U), 0.0, 1.0)
+
+
+## Copa de vino de cristal. fill = nivel (1 = lo justo); slosh = cuánto se mueve la superficie;
+## spill = vino derramado en el mostrador (0-1); pour_x = si cae un chorro, dónde pega (x en coords de ci; NAN = no)
+static func draw_wine_glass(ci: CanvasItem, rect: Rect2, fill: float, time: float, slosh := 0.0, spill := 0.0) -> void:
+	var cx := rect.get_center().x
+	var top := rect.position.y + rect.size.y * 0.04
+	var bowl_h := rect.size.y * 0.5
+	var bot := top + bowl_h
+	var W := rect.size.x * 0.4
+	var foot_y := rect.end.y - rect.size.y * 0.05
+	# Sombra y mancha de vino derramado
+	ellipse(ci, Vector2(cx + 4, foot_y + 3), Vector2(W * 0.95, 6), Color(0, 0, 0, 0.18))
+	if spill > 0.0:
+		ellipse(ci, Vector2(cx + W * 0.3, foot_y + 2), Vector2(W * (0.6 + spill * 0.9), 4 + spill * 4), Color(WINE, 0.75))
+		ellipse(ci, Vector2(cx + W * 0.1, foot_y + 1), Vector2(W * 0.5 * spill, 2 + spill * 2), Color(1, 0.6, 0.65, 0.25))
+	# Pie y tallo
+	ellipse(ci, Vector2(cx, foot_y), Vector2(W * 0.82, 7), Color(0.85, 0.92, 0.96, 0.55))
+	ellipse_arc(ci, Vector2(cx, foot_y), Vector2(W * 0.82, 7), PI * 0.05, PI * 0.95, Color(1, 1, 1, 0.7), 1.5)
+	ci.draw_rect(Rect2(cx - 2.5, bot, 5, foot_y - bot - 3), Color(0.86, 0.93, 0.97, 0.6))
+	ci.draw_line(Vector2(cx - 1, bot + 4), Vector2(cx - 1, foot_y - 6), Color(1, 1, 1, 0.8), 1.2)
+	ellipse(ci, Vector2(cx, bot + 2), Vector2(6, 4), Color(0.86, 0.93, 0.97, 0.7))
+	# Contorno del cáliz
+	var n := 24
+	var left := PackedVector2Array()
+	var right := PackedVector2Array()
+	for k in n + 1:
+		var u := float(k) / n
+		var y := top + u * bowl_h
+		left.append(Vector2(cx - W * glass_halfw(u), y))
+		right.append(Vector2(cx + W * glass_halfw(u), y))
+	var outline := PackedVector2Array(left)
+	for k in range(n, -1, -1):
+		outline.append(right[k])
+	ci.draw_colored_polygon(outline, Color(0.8, 0.9, 0.97, 0.14))
+	# El vino: desde la superficie hasta el fondo, con la superficie que se mueve
+	var su := wine_surface_u(fill)
+	if fill > 0.02:
+		var wob := sin(time * 9.0) * slosh * 0.05
+		var liq := PackedVector2Array()
+		var steps := 16
+		for k in steps + 1:
+			var u := lerpf(su, 1.0, float(k) / steps)
+			liq.append(Vector2(cx - maxf(0.0, W * glass_halfw(u) - 1.5), top + u * bowl_h))
+		for k in range(steps, -1, -1):
+			var u := lerpf(su, 1.0, float(k) / steps)
+			liq.append(Vector2(cx + maxf(0.0, W * glass_halfw(u) - 1.5) + 0.01 * k, top + u * bowl_h))
+		# la superficie inclinada por el bamboleo
+		var sy := top + su * bowl_h
+		var hw := W * glass_halfw(su) - 1.5
+		liq[0] = Vector2(liq[0].x, sy - wob * hw)
+		liq[liq.size() - 1] = Vector2(liq[liq.size() - 1].x, sy + wob * hw)
+		ci.draw_colored_polygon(liq, WINE)
+		# Más oscuro en el centro y abajo, más claro en el borde (como el vino de verdad)
+		var core := PackedVector2Array()
+		for p in liq:
+			core.append(Vector2(cx + (p.x - cx) * 0.6, p.y + (bot - p.y) * 0.12))
+		ci.draw_colored_polygon(core, Color(0.25, 0.0, 0.05, 0.45))
+		# Superficie: elipse con el brillo y el borde "ribete" más claro
+		var surf_c := Vector2(cx, sy)
+		ci.draw_set_transform(surf_c, wob * 0.6, Vector2.ONE)
+		ellipse(ci, Vector2.ZERO, Vector2(hw, maxf(2.0, hw * 0.16)), Color("8c1a30"))
+		ellipse_arc(ci, Vector2.ZERO, Vector2(hw, maxf(2.0, hw * 0.16)), 0, TAU, Color(0.75, 0.2, 0.3, 0.8), 1.2)
+		ellipse(ci, Vector2(-hw * 0.3, -hw * 0.03), Vector2(hw * 0.35, maxf(1.0, hw * 0.05)), Color(1, 0.8, 0.85, 0.35))
+		ci.draw_set_transform(Vector2.ZERO, 0, Vector2.ONE)
+		# "Lágrimas" del vino en el vidrio por encima del nivel
+		if fill > 0.3:
+			for k in 3:
+				var lx := cx - W * 0.5 + k * W * 0.45
+				var ly := sy - 6 - k * 3
+				ci.draw_line(Vector2(lx, ly - 8), Vector2(lx, ly), Color(WINE, 0.25), 1.5)
+	# Brillo del cristal y borde
+	var shine := PackedVector2Array()
+	for k in range(2, n - 6):
+		var u := float(k) / n
+		shine.append(Vector2(cx - W * glass_halfw(u) * 0.78, top + u * bowl_h))
+	ci.draw_polyline(shine, Color(1, 1, 1, 0.55), 3.0, true)
+	ci.draw_polyline(left, Color(0.85, 0.92, 0.97, 0.85), 1.6, true)
+	ci.draw_polyline(right, Color(0.7, 0.8, 0.88, 0.85), 1.6, true)
+	ellipse(ci, Vector2(cx, top), Vector2(W * glass_halfw(0.0), 3.5), Color(0.9, 0.96, 1.0, 0.35))
+	ellipse_arc(ci, Vector2(cx, top), Vector2(W * glass_halfw(0.0), 3.5), 0, TAU, Color(1, 1, 1, 0.8), 1.2)
+
+
+## Botella de vino tinto. mouth = dónde está el pico; angle = 0 parada, más negativo = más volcada
+## (gira alrededor del pico, el cuerpo queda arriba a la derecha al servir).
+static func draw_wine_bottle(ci: CanvasItem, mouth: Vector2, s: float, angle: float) -> void:
+	ci.draw_set_transform(mouth, angle, Vector2.ONE)
+	var glass := Color("1f3a24")
+	var len := 150.0 * s
+	var bw := 19.0 * s
+	# Cápsula (papel de la boca), cuello, hombros y cuerpo, hacia +y
+	rrect(ci, Rect2(Vector2(-6.5, 0) * s, Vector2(13, 26) * s), Color("7a1426"), 2 * s)
+	ci.draw_line(Vector2(-6.5, 22) * s, Vector2(6.5, 22) * s, Color("c9a54a"), 1.5 * s)
+	rrect(ci, Rect2(Vector2(-6, 26) * s, Vector2(12, 26) * s), glass, 2 * s)
+	var sh := PackedVector2Array([Vector2(-6, 50) * s, Vector2(6, 50) * s, Vector2(bw, 78 * s), Vector2(-bw, 78 * s)])
+	ci.draw_colored_polygon(sh, glass)
+	rrect(ci, Rect2(Vector2(-bw, 74 * s), Vector2(bw * 2, len - 74 * s)), glass, 6 * s)
+	# Etiqueta
+	rrect(ci, Rect2(Vector2(-bw + 2 * s, 92 * s), Vector2(bw * 2 - 4 * s, 38 * s)), Color("efe4c8"), 2 * s)
+	ci.draw_rect(Rect2(Vector2(-bw + 2 * s, 96 * s), Vector2(bw * 2 - 4 * s, 3 * s)), Color("7a1426"))
+	ci.draw_set_transform(mouth + Vector2(0, 112 * s).rotated(angle), angle, Vector2.ONE)
+	text(ci, Vector2(-bw, 4 * s), "MALBEC", int(9 * s), Color("4a1018"), HORIZONTAL_ALIGNMENT_CENTER, bw * 2)
+	ci.draw_set_transform(mouth, angle, Vector2.ONE)
+	ellipse(ci, Vector2(0, 124 * s), Vector2(5 * s, 4 * s), Color("c9a54a"))
+	# Brillos del vidrio
+	ci.draw_line(Vector2(-bw * 0.6, 80 * s), Vector2(-bw * 0.6, len - 8 * s), Color(1, 1, 1, 0.28), 3 * s)
+	ci.draw_line(Vector2(-3, 28) * s, Vector2(-3, 48) * s, Color(1, 1, 1, 0.3), 1.5 * s)
+	ci.draw_set_transform(Vector2.ZERO, 0, Vector2.ONE)
 
 
 ## Salero de vidrio con tapa de metal. tilt en radianes; con `pouring` caen granitos.

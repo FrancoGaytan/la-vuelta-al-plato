@@ -141,6 +141,14 @@ var tool_uses_left := {}              # utensilio en uso -> cuántos usos le que
 var tool_clean_now := {}              # si el que está en uso salió limpio
 var tool_last := false
 var closing := false                  # ya se atendió a todos: falta lavar y cerrar
+# Servir vino: se mantiene la botella volcada sobre la copa
+var wine_pouring := false
+var wine_cursor: Control = null
+var wine_tilt := 0.0
+var wine_flow := 0.0
+var wine_slosh := 0.0
+var wine_glass: Control = null
+var wine_player: AudioStreamPlayer = null
 var closing_t := 0.0                  # segundos que quedan para lavar antes de que cierre solo
 var close_button: Button = null
 var mesa_pizza = null                # Italia: la pizza que se está armando en la mesa {stretch, sauce, sprinkles, plate_toppings}
@@ -701,6 +709,7 @@ func _process(delta: float) -> void:
 	_update_sprinkle(delta)
 	_update_salting(delta)
 	_update_washing(delta)
+	_update_pour(delta)
 	elapsed += delta
 
 	if spawned < level["customers"]:
@@ -1271,7 +1280,7 @@ func _show_intro(i: int) -> void:
 		col.add_child(l)
 	var tip := "La barra de cocción marca en verde el punto ideal: sacá la comida cuando la barra esté adentro."
 	if lv.get("drinks", false):
-		tip = "Cada pedido viene con bebida: en la Entrega (tecla 5) arrastrala desde la heladera hasta la bandeja antes de servir."
+		tip = "Cada pedido viene con bebida: en la Entrega (tecla 5) arrastrala desde la heladera hasta la bandeja. El vino se sirve en copa: mantené la botella volcada sobre la copa hasta la parte más ancha."
 	elif not lv["show_zone"]:
 		tip = "Desde hoy la barra NO marca el punto: mirá el reloj, el termómetro de las carnes y el recetario (tecla R)."
 	if i == 0:
@@ -1796,6 +1805,9 @@ func _on_plate_drop(data: Dictionary) -> void:
 			var o = _get_order(selected_id)
 			if o != null:
 				o["plate_drink"] = data["name"]
+				if data["name"] != "Vino tinto":
+					o["wine_fill"] = 0.0      # cambió de bebida: la copa queda vacía
+					o["wine_spill"] = 0.0
 				_refresh_all()
 
 
@@ -2196,6 +2208,8 @@ func _deliver() -> void:
 	if o.get("drink", "") != "":
 		# Con bebida: pesa un 10% y el resto se reparte en proporción
 		s_drink = 100.0 if o.get("plate_drink", "") == o["drink"] else 0.0
+		if s_drink > 0.0 and o["drink"] == "Vino tinto":
+			s_drink = Data.wine_score(o.get("wine_fill", 0.0), o.get("wine_spill", 0.0))
 		total = total * 0.9 + s_drink * 0.1
 	var dirty_plate := not _take_tool("plato")
 	if dirty_plate:
@@ -2225,6 +2239,8 @@ func _deliver() -> void:
 	}
 	if dirty_plate:
 		last_result["lines"].append("¡Plato sucio! -25%")
+	if o.get("drink", "") == "Vino tinto" and o.get("plate_drink", "") == "Vino tinto":
+		last_result["lines"].append("Copa: %s" % Data.wine_desc(o.get("wine_fill", 0.0), o.get("wine_spill", 0.0)))
 
 	served += 1
 	score_sum += total
@@ -2736,7 +2752,7 @@ func _build_drinks_fridge(o, rect: Rect2) -> void:
 			ci.draw_rect(Rect2(6, 22 + (r + 1) * 86 - 3, rect.size.x - 12, 3), Color("c5ccd2"))
 		ci.draw_rect(Rect2(6, 22, rect.size.x - 12, rect.size.y - 28), Color(0.7, 0.85, 1.0, 0.12))
 	_painter(rect, draw_fridge, false)
-	var names: Array = Data.DRINKS.keys()
+	var names: Array = Data.DRINKS.keys().filter(func(d): return Data.DRINKS[d]["kind"] != "vino")   # el vino va en copa, aparte
 	for k in names.size():
 		var n: String = names[k]
 		var b := _prop(Rect2(rect.position.x + 6 + (k % 2) * 57, rect.position.y + 24 + (k / 2) * 86, 57, 82))
@@ -3131,7 +3147,7 @@ func _build_plating_station() -> void:
 	plate.sauce = o["plate_sauce"]
 	plate.toppings = o["plate_toppings"]
 	plate.sprinkles = o["sprinkles"]
-	plate.drink = o.get("plate_drink", "")
+	plate.drink = o.get("plate_drink", "") if o.get("plate_drink", "") != "Vino tinto" else ""   # la copa está en la Entrega
 	plate.gold = _has("vajilla")
 	plate.seed = o["id"]
 	plate.accept_drops = true
@@ -3250,7 +3266,7 @@ func _build_delivery_station() -> void:
 	plate.toppings = o["plate_toppings"]
 	plate.sprinkles = o["sprinkles"]
 	plate.gold = _has("vajilla")
-	plate.drink = o.get("plate_drink", "")
+	plate.drink = o.get("plate_drink", "") if o.get("plate_drink", "") != "Vino tinto" else ""   # la copa está al lado
 	plate.seed = o["id"]
 	var wants_drink: bool = o.get("drink", "") != ""
 	if wants_drink:
@@ -3262,6 +3278,7 @@ func _build_delivery_station() -> void:
 		_build_drinks_fridge(o, Rect2(352, 160, 126, 286))
 		if o.get("plate_drink", "") == "":
 			_tag("Falta la bebida: %s" % o["drink"], Vector2(330, 128), 14)
+		_build_wine_corner(o)
 
 	var bell := _prop(Rect2(800, 330, 120, 126))
 	bell.texture = Art.tex("kitchen/bell")
@@ -3479,3 +3496,174 @@ func _close_now() -> void:
 func _delivery_drop(data: Dictionary) -> void:
 	if data.get("kind", "") == "drink":
 		_on_plate_drop(data)
+
+
+# =====================================================================
+# Servir vino en copa
+# =====================================================================
+
+## Botella de vino y copa sobre el mostrador de la Entrega
+func _build_wine_corner(o) -> void:
+	var bottle := _prop(Rect2(786, 120, 72, 182))
+	bottle.draw_fn = func(ci, r): Art.draw_wine_bottle(ci, Vector2(r.get_center().x, r.position.y + 4), 1.1, 0.0)
+	bottle.text = "Vino"
+	bottle.text_size = 12
+	bottle.mouse_default_cursor_shape = Control.CURSOR_DRAG
+	bottle.tooltip_text = "Mantené apretada la botella y volcala sobre la copa: llenala hasta la parte más ancha"
+	bottle.held.connect(_start_pour)
+	var oid: int = o["id"]
+	wine_glass = _painter(Rect2(878, 156, 92, 146), func(ci, t):
+		var oo = _get_order(oid)
+		var fill: float = oo.get("wine_fill", 0.0) if oo != null else 0.0
+		var spill: float = oo.get("wine_spill", 0.0) if oo != null else 0.0
+		Art.draw_wine_glass(ci, Rect2(0, 0, 92, 146), fill, t, wine_slosh, spill), true)
+	wine_glass.tooltip_text = "Copa de vino"
+	if o.get("wine_fill", 0.0) > 0.0 or o.get("wine_spill", 0.0) > 0.0:
+		var empty := _button("Vaciar copa", _empty_glass, 12)
+		empty.position = Vector2(880, 124)
+		station_box.add_child(empty)
+
+
+func _empty_glass() -> void:
+	var o: Variant = _get_order(selected_id)
+	if o == null:
+		return
+	o["wine_fill"] = 0.0
+	o["wine_spill"] = 0.0
+	if o.get("plate_drink", "") == "Vino tinto":
+		o["plate_drink"] = ""
+	_refresh_all()
+
+
+func _start_pour() -> void:
+	if paused or wine_pouring:
+		return
+	var o: Variant = _get_order(selected_id)
+	if o == null:
+		return
+	wine_pouring = true
+	wine_tilt = 0.0
+	wine_flow = 0.0
+	var cursor := Painter.new()
+	cursor.animate = true
+	cursor.size = Vector2(1, 1)
+	cursor.z_index = 100
+	cursor.fn = func(ci, time): _draw_pour_cursor(ci, time)
+	add_child(cursor)
+	wine_cursor = cursor
+	wine_cursor.position = get_global_mouse_position()
+
+
+## ¿El pico de la botella está arriba de la boca de la copa?
+func _over_glass() -> bool:
+	if wine_glass == null or not is_instance_valid(wine_glass):
+		return false
+	var g := wine_glass.get_global_rect()
+	var m := get_global_mouse_position()
+	return m.x > g.position.x + g.size.x * 0.18 and m.x < g.end.x - g.size.x * 0.18 \
+		and m.y > g.position.y - 110.0 and m.y < g.position.y + g.size.y * 0.25
+
+
+## Altura (global) de la superficie del vino de la copa
+func _wine_surface_y() -> float:
+	var g := wine_glass.get_global_rect()
+	var o: Variant = _get_order(selected_id)
+	var fill: float = o.get("wine_fill", 0.0) if o != null else 0.0
+	var top := g.position.y + g.size.y * 0.04
+	return top + Art.wine_surface_u(fill) * g.size.y * 0.5
+
+
+func _update_pour(delta: float) -> void:
+	wine_slosh = move_toward(wine_slosh, 0.0, delta * 0.7)
+	var want_sound := false
+	if wine_pouring:
+		var o: Variant = _get_order(selected_id)
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or o == null or current_station != 4:
+			_end_pour()
+		else:
+			wine_cursor.position = get_global_mouse_position()
+			var over := _over_glass()
+			# Sobre la copa se va volcando de a poco (al principio no sale nada, después cae el chorro)
+			wine_tilt = move_toward(wine_tilt, -2.05 if over else -0.5, delta * (2.2 if over else 4.0))
+			wine_flow = clampf((-wine_tilt - 1.55) / 0.45, 0.0, 1.0) if over else 0.0
+			if wine_flow > 0.0:
+				_pour_into(o, delta, wine_flow)
+				want_sound = true
+	# Sonido del vino cayendo (glu-glu)
+	if want_sound and sfx_on and wine_player == null:
+		var st := _looped("res://assets/sfx/vino.wav")
+		if st != null:
+			wine_player = AudioStreamPlayer.new()
+			wine_player.stream = st
+			wine_player.volume_db = -30.0
+			add_child(wine_player)
+			wine_player.play()
+	if wine_player != null:
+		var target := -12.0 + linear_to_db(maxf(wine_flow, 0.05)) if want_sound else -45.0
+		wine_player.volume_db = move_toward(wine_player.volume_db, target, 80.0 * delta)
+		if not want_sound and wine_player.volume_db <= -44.0:
+			wine_player.queue_free()
+			wine_player = null
+
+
+func _end_pour() -> void:
+	wine_pouring = false
+	wine_flow = 0.0
+	if wine_cursor != null and is_instance_valid(wine_cursor):
+		wine_cursor.queue_free()
+	wine_cursor = null
+	var o: Variant = _get_order(selected_id)
+	if o != null and o.get("plate_drink", "") == "Vino tinto":
+		var fill: float = o.get("wine_fill", 0.0)
+		if o.get("wine_spill", 0.0) > 0.02:
+			_hint("¡Se derramó! Vaciá la copa y servila de nuevo")
+		elif fill < Data.WINE_OK.x:
+			_hint("Le falta vino: llenala hasta la parte más ancha de la copa")
+		elif fill > Data.WINE_OK.y:
+			_hint("Está muy llena: el vino se sirve hasta la parte más ancha")
+		else:
+			_hint("¡Copa justa!")
+	if current_station == 4:
+		_refresh_station()
+
+
+func _draw_pour_cursor(ci: CanvasItem, time: float) -> void:
+	# El chorro: sale del pico con algo de impulso y cae curvándose hasta la superficie del vino
+	if wine_flow > 0.0 and wine_glass != null and is_instance_valid(wine_glass):
+		var mouth := Vector2.ZERO
+		var hit := Vector2(wine_glass.get_global_rect().get_center().x, _wine_surface_y()) - wine_cursor.position
+		var w := 1.5 + 3.0 * wine_flow
+		var pts := PackedVector2Array()
+		for k in 13:
+			var t := k / 12.0
+			# parábola: arranca hacia adelante (la botella está volcada) y cae
+			var p := mouth.lerp(hit, t)
+			p.x += sin(t * PI) * 6.0 * wine_flow + sin(time * 20.0 + t * 8.0) * 0.6
+			pts.append(p)
+		ci.draw_polyline(pts, Art.WINE.darkened(0.2), w + 1.0, true)
+		ci.draw_polyline(pts, Art.WINE, w, true)
+		var hl := PackedVector2Array()
+		for p in pts:
+			hl.append(p + Vector2(-w * 0.25, 0))
+		ci.draw_polyline(hl, Color(1, 0.7, 0.75, 0.35), 1.0, true)
+		# Ondas donde pega
+		for k in 3:
+			var ph := fmod(time * 3.0 + k / 3.0, 1.0)
+			ci.draw_arc(hit, 3.0 + ph * 12.0, PI * 1.1, PI * 1.9, 10, Color(0.9, 0.4, 0.5, 0.5 * (1.0 - ph)), 1.2)
+	Art.draw_wine_bottle(ci, Vector2.ZERO, 0.85, wine_tilt)
+	if not _over_glass():
+		Art.text(ci, Vector2(-100, 40), "Llevala arriba de la copa", 14, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 200, 4)
+
+
+## Cae vino en la copa del pedido o durante delta segundos con este caudal (0-1)
+func _pour_into(o: Dictionary, delta: float, flow: float) -> void:
+	var fill: float = o.get("wine_fill", 0.0)
+	var hw := Art.glass_halfw(Art.wine_surface_u(fill))
+	# Abajo el cáliz es angosto y sube rápido; cerca de la parte ancha, más despacio
+	fill += Data.WINE_POUR * flow * delta / (0.45 + 0.55 * hw * hw)
+	if fill >= Art.WINE_RIM_FILL:
+		fill = Art.WINE_RIM_FILL
+		o["wine_spill"] = minf(1.0, o.get("wine_spill", 0.0) + delta * flow * 0.8)
+	o["wine_fill"] = fill
+	o["plate_drink"] = "Vino tinto"
+	wine_slosh = minf(1.0, wine_slosh + delta * 2.5 * flow)

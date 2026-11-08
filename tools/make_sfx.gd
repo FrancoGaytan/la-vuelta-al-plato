@@ -41,6 +41,9 @@ func _initialize() -> void:
 	_save(_splash(), "res://assets/sfx/chapoteo.wav", 0.5)
 	_save(_clink(3), "res://assets/sfx/platos.wav", 0.55)
 	_save(_clink(1), "res://assets/sfx/plato.wav", 0.5)
+	rate = SR
+	rng.seed = 53
+	_save(_wine_pour(), "res://assets/sfx/vino.wav", 0.5)
 	quit()
 
 
@@ -455,3 +458,27 @@ func _save(buf: PackedFloat32Array, path: String, level := 0.8) -> void:
 	wav.data = bytes
 	wav.save_to_wav(path)
 	print("ok ", path)
+
+
+## Vino que cae de la botella a la copa (loop): chorrito líquido + "glu-glu" del aire que entra a la botella
+func _wine_pour() -> PackedFloat32Array:
+	var body := _lowpass(_noise(), 0.05)
+	var hiss := _highpass(_noise(), 0.3)
+	var buf := PackedFloat32Array()
+	buf.resize(_n())
+	for i in buf.size():
+		buf[i] = body[i] * 0.9 + hiss[i] * 0.12
+	# Glu-glu: cada ~0.2 s una burbuja grave que sube de tono
+	var t := 0.05
+	while t < LEN - 0.1:
+		var s0 := int(t * rate)
+		var f0 := rng.randf_range(170.0, 240.0)
+		var dur := int(0.09 * rate)
+		var ph := 0.0
+		for k in dur:
+			var x := float(k) / dur
+			ph += TAU * f0 * (1.0 + x * 0.8) / rate
+			_add(buf, s0 + k, sin(ph) * sin(PI * x) * 0.35)
+		t += rng.randf_range(0.17, 0.26)
+	_bubbles(buf, 60, 600.0, 1500.0, 0.06)
+	return buf

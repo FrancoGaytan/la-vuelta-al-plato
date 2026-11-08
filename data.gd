@@ -251,6 +251,35 @@ const COUNTRIES := {
 const COUNTRY_ORDER := ["argentina", "italia", "mexico", "eeuu", "francia", "india", "japon"]
 
 # Bebidas de la heladera del emplatado (desde el Día 7). kind: lata o botella.
+# Copa de vino: el nivel 1 es hasta la parte más ancha. Entre WINE_OK.x y WINE_OK.y está perfecto.
+const WINE_OK := Vector2(0.85, 1.15)
+const WINE_POUR := 0.32       # cuánto sube por segundo con la botella bien volcada
+
+
+## Puntaje de la copa (0-100): lo justo es hasta la parte más ancha; derramar arruina la presentación
+static func wine_score(fill: float, spill: float) -> float:
+	var sc := 100.0
+	if fill < WINE_OK.x:
+		sc = 100.0 - (WINE_OK.x - fill) * 160.0
+	elif fill > WINE_OK.y:
+		sc = 100.0 - (fill - WINE_OK.y) * 200.0
+	if spill > 0.02:
+		sc *= 0.5
+	return clampf(sc, 0.0, 100.0)
+
+
+## Cómo quedó la copa, en palabras
+static func wine_desc(fill: float, spill: float) -> String:
+	if spill > 0.02:
+		return "derramada"
+	if fill < 0.05:
+		return "vacía"
+	if fill < WINE_OK.x:
+		return "poca"
+	if fill > WINE_OK.y:
+		return "muy llena"
+	return "justa"
+
 const DRINKS := {
 	"Agua": {"color": Color("8fd3f4"), "label": Color("2f6f9f"), "kind": "botella"},
 	"Cola": {"color": Color("4a1e10"), "label": Color("c8281e"), "kind": "lata"},
@@ -258,4 +287,5 @@ const DRINKS := {
 	"Naranja": {"color": Color("f39a1e"), "label": Color("ffffff"), "kind": "botella"},
 	"Pomelo": {"color": Color("f2a3a8"), "label": Color("d9475a"), "kind": "lata"},
 	"Limonada": {"color": Color("f3e27a"), "label": Color("4f9a48"), "kind": "botella"},
+	"Vino tinto": {"color": Color("6e0f22"), "label": Color("efe4c8"), "kind": "vino"},   # se sirve en copa: hay que llenarla con la botella
 }
