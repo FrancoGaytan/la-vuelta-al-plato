@@ -179,6 +179,8 @@ var overlay: Control = null
 func _ready() -> void:
 	rng.randomize()
 	theme = _make_theme()
+	if save_path == SAVE_PATH:
+		_load_profiles()      # las pruebas automáticas usan su propio archivo y no tocan los perfiles
 	_load_progress()
 	_build_ui()
 	_setup_music()
@@ -1038,11 +1040,11 @@ func _show_menu() -> void:
 	var light := func(ci, _t): Art.draw_lighting(ci, Rect2(0, 0, 1280, 720))
 	_painter(Rect2(0, 0, 1280, 720), light, false, bg)
 	var chef := CustomerView.new()
-	chef.look = Art.chef_look()
+	chef.look = _player_look()
 	chef.scale_factor = 2.3
 	chef.position = Vector2(60, 40)
 	chef.size = Vector2(380, 450)
-	chef.bubble = "¡Bienvenido a la cocina!"
+	chef.bubble = "¡A cocinar, %s!" % _player_name() if _player_name() != "" else "¡Bienvenido a la cocina!"
 	bg.add_child(chef)
 
 	var card := _paper_card(Vector2(560, 0))
@@ -1115,12 +1117,30 @@ func _show_title() -> void:
 	sub.size = Vector2(1280, 30)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	bg.add_child(sub)
-	var play := _button("Jugar", _show_map, 28)
+	var play := _button("Jugar", _on_play, 28)
 	play.custom_minimum_size = Vector2(260, 64)
 	play.position = Vector2(510, 540)
 	bg.add_child(play)
-	var reset := _button("Borrar progreso", _reset_progress, 13)
-	reset.position = Vector2(1130, 676)
+	# Quién está jugando: su cocinero y el botón para cambiar de perfil
+	if not profile.is_empty() and not profile.get("nuevo", false):
+		var look := _player_look()
+		var nm := _player_name()
+		var who := func(ci, t):
+			Art.rrect(ci, Rect2(470, 622, 340, 60), Color(0.12, 0.09, 0.07, 0.8), 14)
+			Art.draw_character(ci, look, Vector2(512, 672), 0.62, 0, t, true)
+			Art.text(ci, Vector2(552, 647), "Cocinero", 13, Color(1, 1, 1, 0.6))
+			Art.text(ci, Vector2(552, 670), nm, 20, Color.WHITE)
+		_painter(Rect2(0, 0, 1280, 720), who, true, bg)
+		var change := _button("Cambiar", _show_profiles, 14)
+		change.position = Vector2(712, 636)
+		bg.add_child(change)
+	elif profiles.size() > 1:
+		var change := _button("Elegir cocinero", _show_profiles, 14)
+		change.position = Vector2(570, 636)
+		bg.add_child(change)
+	var reset := _button("Borrar partida", _reset_progress, 13)
+	reset.position = Vector2(1140, 676)
+	reset.tooltip_text = "Borra la partida del cocinero que está jugando"
 	bg.add_child(reset)
 
 
@@ -1454,9 +1474,15 @@ func _finish_level() -> void:
 	box.add_child(_label("¡Cerró el local!", 40, COL_INK))
 	box.add_child(_label(level["name"], 20, COL_INK))
 	var n_stars := _stars(avg)
+	# Tu cocinero, contento o preocupado según cómo salió el día, y las estrellas al lado
+	var look := _player_look()
+	var mood := 0 if avg >= 75.0 else (1 if avg >= Data.PASS_SCORE else 2)
 	var stars_pic := Painter.new()
-	stars_pic.custom_minimum_size = Vector2(200, 52)
-	stars_pic.fn = func(ci, _t): Art.stars(ci, Vector2(60, 26), 20, n_stars)
+	stars_pic.custom_minimum_size = Vector2(320, 104)
+	stars_pic.animate = true
+	stars_pic.fn = func(ci, t):
+		Art.draw_character(ci, look, Vector2(70, 102), 0.95, mood, t, true)
+		Art.stars(ci, Vector2(190, 56), 20, n_stars)
 	box.add_child(stars_pic)
 	box.add_child(_label("Platos servidos: %d" % served + ("   ·   Se fueron sin comer: %d" % lost if lost > 0 else ""), 20, COL_INK))
 	box.add_child(_label("Calificación promedio: %d%%" % int(avg), 20, COL_INK))
@@ -3667,3 +3693,433 @@ func _pour_into(o: Dictionary, delta: float, flow: float) -> void:
 	o["wine_fill"] = fill
 	o["plate_drink"] = "Vino tinto"
 	wine_slosh = minf(1.0, wine_slosh + delta * 2.5 * flow)
+
+
+# =====================================================================
+# Perfiles: cada uno con su nombre, su cocinero y su propia partida
+# =====================================================================
+
+var profiles_path := "user://perfiles.cfg"   # las pruebas usan otro archivo
+var profile_prefix := "user://progreso_"     # archivo de partida de cada perfil nuevo (las pruebas usan otro)
+const MAX_PROFILES := 4
+## Opciones del cocinero: [clave, título, [[nombre, valor], ...]]
+const COOK_OPTIONS := [
+	["piel", "Piel", [["Muy clara", 0], ["Clara", 1], ["Trigueña", 2], ["Morena", 3], ["Oscura", 4], ["Muy oscura", 5]]],
+	["pelo", "Pelo", [["Negro", 0], ["Castaño oscuro", 1], ["Castaño", 2], ["Rubio oscuro", 3], ["Rubio", 4],
+		["Canoso", 5], ["Colorado", 6], ["Azabache", 7]]],
+	["peinado", "Peinado", [["Corto", 0], ["Largo", 1], ["Rulos", 2], ["Rodete", 3], ["Pelado", 4], ["Punk", 6]]],
+	["gorro", "Gorro", [["De chef", "toque"], ["Pañuelo", "bandana"], ["Gorra", "gorra"], ["Sin gorro", ""]]],
+	["gorro_color", "Color del gorro", [["Blanco", Color("f4f1ea")], ["Rojo", Color("c8463c")], ["Azul", Color("3d6fb0")],
+		["Verde", Color("3f8f5a")], ["Negro", Color("2b2b30")], ["Amarillo", Color("e6b83a")]]],
+	["chaqueta", "Chaqueta", [["Blanca", Color("fbfbf8")], ["Negra", Color("2b2b30")], ["Gris", Color("6b737b")],
+		["Azul", Color("2f4f7a")], ["Bordó", Color("7a1f2b")]]],
+	["delantal", "Delantal", [["Crema", Color("f4efe2")], ["Bordó", Color("7a1426")], ["Verde", Color("2f5d50")],
+		["Azul", Color("2f4f7a")], ["Negro", Color("2b2b30")], ["Sin delantal", null]]],
+	["panuelo", "Pañuelo al cuello", [["Rojo", Color("d9534a")], ["Azul", Color("3d7ab8")], ["Verde", Color("4caf6a")],
+		["Amarillo", Color("e6a33a")], ["Negro", Color("2b2b30")], ["Sin pañuelo", null]]],
+	["detalle", "Detalle", [["Nada", 0], ["Anteojos", 1], ["Bigote", 2], ["Aros", 3], ["Pecas", 4]]],
+	["cuerpo", "Contextura", [["Flaco", 0.9], ["Normal", 1.0], ["Grandote", 1.13]]],
+]
+
+var profiles: Array = []          # [{id, name, cook: {clave: índice}, file, nuevo?}]
+var profile := {}                 # el perfil que está jugando
+var edit_cook := {}               # el cocinero que se está armando en el editor
+var edit_new := false
+var edit_name_field: LineEdit = null
+var edit_value_labels := {}
+var delete_armed := ""            # id del perfil que se está por borrar (segundo toque)
+
+
+func _default_cook() -> Dictionary:
+	return {"piel": 1, "pelo": 1, "peinado": 0, "gorro": 0, "gorro_color": 0, "chaqueta": 0, "delantal": 1,
+		"panuelo": 0, "detalle": 0, "cuerpo": 1}
+
+
+func _random_cook() -> Dictionary:
+	var c := {}
+	for opt in COOK_OPTIONS:
+		c[opt[0]] = rng.randi() % opt[2].size()
+	return c
+
+
+func _cook_value(cook: Dictionary, key: String) -> Variant:
+	for opt in COOK_OPTIONS:
+		if opt[0] == key:
+			var idx: int = clampi(cook.get(key, 0), 0, opt[2].size() - 1)
+			return opt[2][idx][1]
+	return null
+
+
+## Arma el "look" para dibujar al cocinero a partir de lo elegido
+func _cook_look(cook: Dictionary) -> Dictionary:
+	var hat: String = _cook_value(cook, "gorro")
+	var apron = _cook_value(cook, "delantal")
+	var look := {
+		"skin": Art.SKINS[_cook_value(cook, "piel")],
+		"hair": Art.HAIRS[_cook_value(cook, "pelo")],
+		"style": _cook_value(cook, "peinado"),
+		"shirt": _cook_value(cook, "chaqueta"),
+		"cap": _cook_value(cook, "gorro_color"),
+		"hat": hat,
+		"acc": _cook_value(cook, "detalle"),
+		"w": _cook_value(cook, "cuerpo"),
+		"seed": 7,
+		"jacket": true,
+		"scarf": _cook_value(cook, "panuelo"),
+		"apron": apron != null,
+	}
+	if apron != null:
+		look["apron_color"] = apron
+	return look
+
+
+## El cocinero del perfil que está jugando (o el chef de siempre si no hay perfil)
+func _player_look() -> Dictionary:
+	if profile.is_empty():
+		return Art.chef_look()
+	return _cook_look(profile.get("cook", _default_cook()))
+
+
+func _player_name() -> String:
+	return profile.get("name", "") if not profile.is_empty() else ""
+
+
+func _load_profiles() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(profiles_path) == OK:
+		profiles = cfg.get_value("perfiles", "lista", [])
+		var cur: String = cfg.get_value("perfiles", "actual", "")
+		for p in profiles:
+			if p["id"] == cur:
+				profile = p
+		if profile.is_empty() and not profiles.is_empty():
+			profile = profiles[0]
+	elif FileAccess.file_exists(SAVE_PATH) or FileAccess.file_exists(OS.get_data_dir().path_join("Godot/app_userdata/Viandas/progreso.cfg")):
+		# Ya había una partida de antes de los perfiles: pasa a ser el primer perfil (falta ponerle nombre y cocinero)
+		profile = {"id": "p1", "name": "", "cook": _default_cook(), "file": SAVE_PATH, "nuevo": true}
+		profiles = [profile]
+		_save_profiles()
+	if not profile.is_empty():
+		save_path = profile["file"]
+
+
+func _save_profiles() -> void:
+	if save_path != SAVE_PATH and profile.is_empty() and profiles_path == "user://perfiles.cfg":
+		return      # pruebas automáticas: no tocar los perfiles de verdad
+	var cfg := ConfigFile.new()
+	cfg.set_value("perfiles", "lista", profiles)
+	cfg.set_value("perfiles", "actual", profile.get("id", ""))
+	cfg.save(profiles_path)
+
+
+## Vuelve todo al estado de una partida nueva (sin guardar)
+func _reset_state() -> void:
+	savings = 0
+	owned = []
+	country_progress = {}
+	owned_countries = ["argentina"]
+	current_country = "argentina"
+	_use_country(current_country)
+
+
+func _switch_profile(p: Dictionary) -> void:
+	if not profile.is_empty() and profile["id"] == p["id"]:
+		return
+	if not profile.is_empty():
+		_save_progress()
+	profile = p
+	save_path = p["file"]
+	_reset_state()
+	_load_progress()
+	_save_profiles()
+	_update_music_button()
+	if music != null:
+		if music_on and not music.playing:
+			music.play()
+		elif not music_on:
+			music.stop()
+
+
+## Lo que dice la tarjeta de un perfil: ahorros y locales (se lee su archivo de partida)
+func _profile_summary(p: Dictionary) -> String:
+	var cfg := ConfigFile.new()
+	if cfg.load(p["file"]) != OK:
+		return "Partida nueva"
+	var sv: int = cfg.get_value("progreso", "ahorros", 0)
+	var locs: Array = cfg.get_value("paises", "locales", ["argentina"])
+	var days := 0
+	var prog: Dictionary = cfg.get_value("paises", "progreso", {})
+	for c in prog:
+		days += prog[c].get("mejores", {}).size()
+	return "Ahorros $%d\n%d %s · %d %s jugados" % [sv, locs.size(), "local" if locs.size() == 1 else "locales",
+		days, "día" if days == 1 else "días"]
+
+
+## "Jugar" del título: si todavía no hay cocinero, primero se arma
+func _on_play() -> void:
+	if profile.is_empty():
+		_show_cook_editor(true)
+	elif profile.get("nuevo", false):
+		_show_cook_editor(false)
+	else:
+		_show_map()
+
+
+## Fondo de las pantallas de perfil: la cocina con luz cálida
+func _profile_bg(title: String) -> Control:
+	_stop_everything()
+	var bg := Control.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
+	overlay = bg
+	var draw_bg := func(ci, _t):
+		Art.draw_kitchen_wall(ci, Rect2(0, 0, 1280, 520))
+		Art.draw_wood_counter(ci, Rect2(0, 520, 1280, 200))
+		Art.draw_lighting(ci, Rect2(0, 0, 1280, 720))
+	var p := _painter(Rect2(0, 0, 1280, 720), draw_bg, false, bg)
+	p.mouse_filter = Control.MOUSE_FILTER_STOP
+	var t := _label(title, 34, Color.WHITE, 6)
+	t.position = Vector2(0, 18)
+	t.size = Vector2(1280, 50)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bg.add_child(t)
+	return bg
+
+
+# --- Editor del cocinero ---
+
+func _show_cook_editor(is_new: bool) -> void:
+	edit_new = is_new
+	edit_cook = _random_cook() if is_new else profile.get("cook", _default_cook()).duplicate()
+	if is_new:
+		edit_cook["gorro"] = 0       # de entrada, con gorro de chef
+	delete_armed = ""
+	var bg := _profile_bg("Nuevo cocinero" if is_new and not profiles.is_empty() else "Tu cocinero")
+	# Izquierda: el cocinero grande, con el nombre abajo
+	var preview := func(ci, t):
+		var look := _cook_look(edit_cook)
+		Art.ellipse(ci, Vector2(330, 612), Vector2(150, 18), Color(0, 0, 0, 0.25))
+		Art.draw_character(ci, look, Vector2(330, 610), 2.6, 0, t, false, sin(t * 2.0) * 1.5)
+		var nm := ""
+		if edit_name_field != null and is_instance_valid(edit_name_field):
+			nm = edit_name_field.text.strip_edges()
+		Art.rrect(ci, Rect2(170, 628, 320, 52), Color(0.12, 0.09, 0.07, 0.85), 12)
+		Art.text(ci, Vector2(170, 664), nm if nm != "" else "¿Cómo te llamás?", 26,
+			Color.WHITE if nm != "" else Color(1, 1, 1, 0.5), HORIZONTAL_ALIGNMENT_CENTER, 320)
+	_painter(Rect2(0, 0, 1280, 720), preview, true, bg)
+	# Derecha: el nombre y las opciones
+	var card := _paper_card(Vector2(600, 0))
+	card.position = Vector2(640, 76)
+	bg.add_child(card)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 4)
+	card.add_child(col)
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 12)
+	col.add_child(name_row)
+	var nl := _label("Nombre", 18, COL_INK)
+	nl.custom_minimum_size = Vector2(170, 0)
+	name_row.add_child(nl)
+	edit_name_field = LineEdit.new()
+	edit_name_field.text = "" if is_new else String(profile.get("name", ""))
+	edit_name_field.placeholder_text = "Tu nombre de cocinero"
+	edit_name_field.max_length = 16
+	edit_name_field.custom_minimum_size = Vector2(360, 42)
+	edit_name_field.add_theme_font_size_override("font_size", 20)
+	var le_sb := _sb(Color("fffdf5"), Color("c9a86a"), 8, 2)
+	edit_name_field.add_theme_stylebox_override("normal", le_sb)
+	edit_name_field.add_theme_stylebox_override("focus", _sb(Color("ffffff"), Color("d9a520"), 8, 3))
+	edit_name_field.add_theme_color_override("font_color", COL_INK)
+	edit_name_field.add_theme_color_override("caret_color", COL_INK)
+	edit_name_field.add_theme_color_override("font_placeholder_color", Color(0.4, 0.33, 0.25, 0.6))
+	name_row.add_child(edit_name_field)
+	col.add_child(HSeparator.new())
+	edit_value_labels = {}
+	for opt in COOK_OPTIONS:
+		var key: String = opt[0]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		col.add_child(row)
+		var l := _label(opt[1], 16, COL_INK)
+		l.custom_minimum_size = Vector2(170, 0)
+		row.add_child(l)
+		var prev := _button("<", _cook_step.bind(key, -1), 16)
+		prev.custom_minimum_size = Vector2(46, 34)
+		row.add_child(prev)
+		var v := _label("", 17, COL_INK)
+		v.custom_minimum_size = Vector2(200, 0)
+		v.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		row.add_child(v)
+		edit_value_labels[key] = v
+		var nxt := _button(">", _cook_step.bind(key, 1), 16)
+		nxt.custom_minimum_size = Vector2(46, 34)
+		row.add_child(nxt)
+	_refresh_cook_labels()
+	col.add_child(HSeparator.new())
+	var btns := HBoxContainer.new()
+	btns.add_theme_constant_override("separation", 10)
+	col.add_child(btns)
+	btns.add_child(_button("Al azar", _cook_randomize, 16))
+	var first_time: bool = (is_new and profiles.is_empty()) or (not is_new and profile.get("nuevo", false))
+	if not first_time:
+		btns.add_child(_button("Cancelar", _show_profiles, 16))
+	var ok := _button("¡Listo, a cocinar!", _save_cook, 18)
+	ok.custom_minimum_size = Vector2(230, 0)
+	btns.add_child(ok)
+	if not is_new and profile.get("nuevo", false):
+		var note := _label("Tu partida de antes sigue intacta: ponele nombre y armá tu cocinero.", 14, Color.WHITE, 4)
+		note.position = Vector2(660, 684)
+		bg.add_child(note)
+
+
+func _cook_step(key: String, d: int) -> void:
+	for opt in COOK_OPTIONS:
+		if opt[0] == key:
+			var n: int = opt[2].size()
+			edit_cook[key] = (int(edit_cook.get(key, 0)) + d + n) % n
+	_refresh_cook_labels()
+
+
+func _cook_randomize() -> void:
+	edit_cook = _random_cook()
+	_refresh_cook_labels()
+
+
+func _refresh_cook_labels() -> void:
+	for opt in COOK_OPTIONS:
+		var key: String = opt[0]
+		if edit_value_labels.has(key) and is_instance_valid(edit_value_labels[key]):
+			var idx: int = clampi(edit_cook.get(key, 0), 0, opt[2].size() - 1)
+			var txt: String = opt[2][idx][0]
+			# El color del gorro no se usa con el gorro de chef (siempre es blanco) ni sin gorro
+			if key == "gorro_color" and String(_cook_value(edit_cook, "gorro")) in ["toque", ""]:
+				txt = "-"
+			edit_value_labels[key].text = txt
+
+
+func _save_cook() -> void:
+	var nm := ""
+	if edit_name_field != null and is_instance_valid(edit_name_field):
+		nm = edit_name_field.text.strip_edges()
+	if nm == "":
+		_toast_name_needed()
+		return
+	if edit_new:
+		if not profile.is_empty():
+			_save_progress()
+		var n := 1
+		var ids: Array = profiles.map(func(pr): return pr["id"])
+		while ("p%d" % n) in ids:
+			n += 1
+		var id := "p%d" % n
+		var p := {"id": id, "name": nm, "cook": edit_cook.duplicate(), "file": profile_prefix + id + ".cfg"}
+		profiles.append(p)
+		profile = p
+		save_path = p["file"]
+		_reset_state()
+		_save_progress()
+	else:
+		profile["name"] = nm
+		profile["cook"] = edit_cook.duplicate()
+		profile.erase("nuevo")
+	_save_profiles()
+	_show_map()
+
+
+func _toast_name_needed() -> void:
+	if edit_name_field != null and is_instance_valid(edit_name_field):
+		edit_name_field.placeholder_text = "¡Poné tu nombre!"
+		edit_name_field.grab_focus()
+
+
+# --- Elegir perfil ---
+
+func _show_profiles() -> void:
+	var bg := _profile_bg("¿Quién cocina hoy?")
+	var n := profiles.size()
+	var cw := 260.0
+	var cards := n + (1 if n < MAX_PROFILES else 0)
+	var total := cw * cards + 24.0 * maxi(cards - 1, 0)
+	var x := 640.0 - total / 2.0
+	for p in profiles:
+		var pp: Dictionary = p
+		var cur: bool = pp["id"] == profile.get("id", "")
+		var look := _cook_look(pp.get("cook", _default_cook()))
+		var nm: String = pp["name"] if pp["name"] != "" else "Sin nombre"
+		var summary := _profile_summary(pp)
+		var cx := x
+		var draw_card := func(ci, t):
+			Art.rrect(ci, Rect2(cx + 4, 108, cw, 470), Color(0, 0, 0, 0.3), 14)
+			Art.rrect(ci, Rect2(cx, 104, cw, 470), COL_PAPER, 14, Color("e0b44a") if cur else Color("c9a86a"), 4 if cur else 2)
+			Art.draw_character(ci, look, Vector2(cx + cw / 2.0, 352), 1.22, 0, t)
+			Art.rrect(ci, Rect2(cx, 380, cw, 120), COL_PAPER, 10)
+			Art.text(ci, Vector2(cx, 418), nm, 26, COL_INK, HORIZONTAL_ALIGNMENT_CENTER, cw)
+			var lines := summary.split("\n")
+			for k in lines.size():
+				Art.text(ci, Vector2(cx, 450 + k * 22), lines[k], 15, Color(0.35, 0.28, 0.2), HORIZONTAL_ALIGNMENT_CENTER, cw)
+			if cur:
+				Art.rrect(ci, Rect2(cx + cw / 2.0 - 70, 92, 140, 24), Color("e0b44a"), 12)
+				Art.text(ci, Vector2(cx, 109), "ÚLTIMO EN JUGAR", 12, Color("4a3410"), HORIZONTAL_ALIGNMENT_CENTER, cw)
+		_painter(Rect2(0, 0, 1280, 720), draw_card, true, bg)
+		var play := _button("Jugar", _pick_profile.bind(pp, "jugar"), 18)
+		play.position = Vector2(cx + 20, 506)
+		play.custom_minimum_size = Vector2(cw - 40, 0)
+		bg.add_child(play)
+		var edit := _button("Editar", _pick_profile.bind(pp, "editar"), 14)
+		edit.position = Vector2(cx, 590)
+		bg.add_child(edit)
+		var armed: bool = delete_armed == pp["id"]
+		var del := _button("¿Seguro? Tocá otra vez" if armed else "Borrar", _delete_profile.bind(pp), 14)
+		del.position = Vector2(cx + cw - (180.0 if armed else 76.0), 590)
+		if armed:
+			del.add_theme_color_override("font_color", Color("c0281a"))
+		bg.add_child(del)
+		x += cw + 24.0
+	if n < MAX_PROFILES:
+		var nx := x
+		var draw_new := func(ci, _t):
+			Art.rrect(ci, Rect2(nx, 104, cw, 470), Color(1, 1, 1, 0.12), 14, Color(1, 1, 1, 0.6), 3)
+			Art.text(ci, Vector2(nx, 330), "+", 90, Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_CENTER, cw)
+			Art.text(ci, Vector2(nx, 400), "Nuevo cocinero", 22, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, cw, 4)
+		_painter(Rect2(0, 0, 1280, 720), draw_new, false, bg)
+		var add := _button("Crear", _show_cook_editor.bind(true), 18)
+		add.position = Vector2(nx + 20, 506)
+		add.custom_minimum_size = Vector2(cw - 40, 0)
+		bg.add_child(add)
+	var back := _button("Volver", _show_title, 16)
+	back.position = Vector2(20, 660)
+	bg.add_child(back)
+	var note := _label("Cada cocinero tiene su propia partida, guardada en este dispositivo.", 15, Color.WHITE, 4)
+	note.position = Vector2(0, 664)
+	note.size = Vector2(1280, 30)
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bg.add_child(note)
+
+
+func _pick_profile(p: Dictionary, action: String) -> void:
+	_switch_profile(p)
+	delete_armed = ""
+	if action == "editar" or p.get("nuevo", false) or String(p.get("name", "")) == "":
+		_show_cook_editor(false)
+	else:
+		_show_map()
+
+
+func _delete_profile(p: Dictionary) -> void:
+	if delete_armed != p["id"]:
+		delete_armed = p["id"]       # primer toque: pide confirmación
+		_show_profiles()
+		return
+	delete_armed = ""
+	profiles.erase(p)
+	if FileAccess.file_exists(p["file"]):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(p["file"]))
+	if profile.get("id", "") == p["id"]:
+		profile = {}
+		_reset_state()
+		if not profiles.is_empty():
+			_switch_profile(profiles[0])
+		else:
+			save_path = SAVE_PATH
+	_save_profiles()
+	_show_profiles()

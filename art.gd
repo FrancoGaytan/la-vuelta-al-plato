@@ -1971,12 +1971,16 @@ static func draw_character(ci: CanvasItem, look: Dictionary, pos: Vector2, s: fl
 		# Volumen del torso: lado derecho en sombra y brillo en los hombros
 		rrect(ci, Rect2(pos.x + 10 * w * s, top + 4 * s, 28 * w * s, pos.y - top + 16 * s), Color(shirt.darkened(0.16), 0.7), 20 * s)
 		rrect(ci, Rect2(pos.x - 30 * w * s, top + 3 * s, 30 * w * s, 8 * s), Color(1, 1, 1, 0.12), 6 * s)
-		if style == 7:
+		if style == 7 or look.get("jacket", false):
+			# Chaqueta de cocinero cruzada, con dos filas de botones y pañuelo al cuello
+			var btn: Color = shirt.darkened(0.25) if shirt.v > 0.6 else shirt.lightened(0.35)
 			for k in 3:
 				for side in [-1, 1]:
-					ci.draw_circle(Vector2(pos.x + side * 12 * s, top + (24 + k * 18) * s), 3 * s, Color("c9c9c0"))
-			ci.draw_colored_polygon(PackedVector2Array([Vector2(pos.x - 14 * s, top), Vector2(pos.x + 14 * s, top),
-				Vector2(pos.x, top + 12 * s)]), Color("d9534a"))
+					ci.draw_circle(Vector2(pos.x + side * 12 * s, top + (24 + k * 18) * s), 3 * s, btn)
+			var scarf = look.get("scarf", Color("d9534a"))
+			if scarf != null:
+				ci.draw_colored_polygon(PackedVector2Array([Vector2(pos.x - 14 * s, top), Vector2(pos.x + 14 * s, top),
+					Vector2(pos.x, top + 12 * s)]), scarf)
 		else:
 			ci.draw_colored_polygon(PackedVector2Array([Vector2(pos.x - 11 * s, top), Vector2(pos.x + 11 * s, top),
 				Vector2(pos.x, top + 16 * s)]), skin.darkened(0.08))
@@ -1984,11 +1988,13 @@ static func draw_character(ci: CanvasItem, look: Dictionary, pos: Vector2, s: fl
 		ellipse(ci, hc + Vector2(0, 28) * s, Vector2(13, 5) * s, Color(skin.darkened(0.35), 0.6))   # sombra del mentón
 		if look.get("apron", false):
 			# Delantal con tiras al cuello y bolsillo
-			rrect(ci, Rect2(pos.x - 26 * s, top + 22 * s, 52 * s, pos.y - top), Color("f4efe2"), 8 * s)
-			ci.draw_line(Vector2(pos.x - 20 * s, top + 24 * s), Vector2(pos.x - 8 * s, top + 2 * s), Color("f4efe2"), 3 * s)
-			ci.draw_line(Vector2(pos.x + 20 * s, top + 24 * s), Vector2(pos.x + 8 * s, top + 2 * s), Color("f4efe2"), 3 * s)
-			rrect(ci, Rect2(pos.x - 12 * s, top + 52 * s, 24 * s, 14 * s), Color("e3dccb"), 3 * s)
-			rrect(ci, Rect2(pos.x + 14 * s, top + 8 * s, 18 * s, 7 * s), Color("d9a520"), 2 * s)   # identificación
+			var ap: Color = look.get("apron_color", Color("f4efe2"))
+			rrect(ci, Rect2(pos.x - 26 * s, top + 22 * s, 52 * s, pos.y - top), ap, 8 * s)
+			ci.draw_line(Vector2(pos.x - 20 * s, top + 24 * s), Vector2(pos.x - 8 * s, top + 2 * s), ap, 3 * s)
+			ci.draw_line(Vector2(pos.x + 20 * s, top + 24 * s), Vector2(pos.x + 8 * s, top + 2 * s), ap, 3 * s)
+			rrect(ci, Rect2(pos.x - 12 * s, top + 52 * s, 24 * s, 14 * s), ap.darkened(0.1), 3 * s)
+			if not look.get("jacket", false):
+				rrect(ci, Rect2(pos.x + 14 * s, top + 8 * s, 18 * s, 7 * s), Color("d9a520"), 2 * s)   # identificación
 		if look.get("notepad", false):
 			_draw_notepad(ci, pos, top, s, time, look.get("writing", false))
 
@@ -2143,3 +2149,44 @@ static func _draw_hair(ci: CanvasItem, look: Dictionary, hc: Vector2, s: float, 
 			ci.draw_circle(hc + Vector2(17, -50) * s, 17 * s, hat)
 			ci.draw_circle(hc + Vector2(0, -60) * s, 20 * s, hat)
 			ci.draw_arc(hc + Vector2(0, -60) * s, 20 * s, PI * 1.1, PI * 1.6, 10, Color("e6e6de"), 2.0 * s)
+	_draw_headwear(ci, look, hc, s)
+
+
+## Gorro del cocinero del jugador (va encima del peinado): de chef, pañuelo atado o gorra
+static func _draw_headwear(ci: CanvasItem, look: Dictionary, hc: Vector2, s: float) -> void:
+	var col: Color = look.get("cap", Color.WHITE)
+	match String(look.get("hat", "")):
+		"toque":
+			var hat := Color("fbfbf8")
+			rrect(ci, Rect2(hc + Vector2(-28, -38) * s, Vector2(56, 17) * s), hat, 3 * s, Color("d8d8d0"), 1)
+			for k in 4:
+				ci.draw_line(hc + Vector2(-20 + k * 13, -37) * s, hc + Vector2(-20 + k * 13, -23) * s, Color("e6e6de"), 1.5 * s)
+			ci.draw_circle(hc + Vector2(-18, -52) * s, 17 * s, hat)
+			ci.draw_circle(hc + Vector2(18, -52) * s, 17 * s, hat)
+			ci.draw_circle(hc + Vector2(0, -62) * s, 21 * s, hat)
+			ci.draw_arc(hc + Vector2(0, -62) * s, 21 * s, PI * 1.1, PI * 1.6, 10, Color("e6e6de"), 2.0 * s)
+			ellipse(ci, hc + Vector2(8, -50) * s, Vector2(12, 7) * s, Color(0, 0, 0, 0.04))
+		"bandana":
+			# Pañuelo atado: cubre la parte de arriba de la cabeza, con el nudo y las puntas al costado
+			var pts := PackedVector2Array()
+			for k in 15:
+				var a := PI + PI * k / 14.0
+				pts.append(hc + Vector2(cos(a) * 33.5, sin(a) * 31.0 - 3.0) * s)
+			pts.append(hc + Vector2(30, -8) * s)
+			pts.append(hc + Vector2(-30, -8) * s)
+			ci.draw_colored_polygon(pts, col)
+			rrect(ci, Rect2(hc + Vector2(-33, -13) * s, Vector2(66, 7) * s), col.darkened(0.15), 3 * s)
+			for d in [Vector2(-14, -22), Vector2(0, -27), Vector2(14, -22), Vector2(-6, -16), Vector2(8, -16)]:
+				ci.draw_circle(hc + d * s, 2.2 * s, Color(1, 1, 1, 0.55))
+			ci.draw_circle(hc + Vector2(33, -8) * s, 5 * s, col.darkened(0.2))
+			ci.draw_colored_polygon(PackedVector2Array([hc + Vector2(34, -8) * s, hc + Vector2(48, 2) * s, hc + Vector2(40, 8) * s]), col.darkened(0.1))
+			ci.draw_colored_polygon(PackedVector2Array([hc + Vector2(34, -6) * s, hc + Vector2(44, 12) * s, hc + Vector2(35, 13) * s]), col)
+		"gorra":
+			var pts := PackedVector2Array()
+			for k in 15:
+				var a := PI + PI * k / 14.0
+				pts.append(hc + Vector2(cos(a), sin(a) * 0.9) * 33 * s + Vector2(0, -4) * s)
+			ci.draw_colored_polygon(pts, col)
+			rrect(ci, Rect2(hc + Vector2(-6, -9) * s, Vector2(46, 8) * s), col.darkened(0.2), 4 * s)
+			ci.draw_circle(hc + Vector2(0, -33) * s, 3.5 * s, col.darkened(0.25))
+			ellipse(ci, hc + Vector2(-8, -24) * s, Vector2(10, 4) * s, Color(1, 1, 1, 0.2))
