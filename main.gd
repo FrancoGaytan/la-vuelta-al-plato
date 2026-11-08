@@ -1128,14 +1128,14 @@ func _show_title() -> void:
 		var who := func(ci, t):
 			Art.rrect(ci, Rect2(470, 622, 340, 60), Color(0.12, 0.09, 0.07, 0.8), 14)
 			Art.draw_character(ci, look, Vector2(512, 672), 0.62, 0, t, true)
-			Art.text(ci, Vector2(552, 647), "Cocinero", 13, Color(1, 1, 1, 0.6))
+			Art.text(ci, Vector2(552, 647), "Cocinera" if look.get("fem", false) else "Cocinero", 13, Color(1, 1, 1, 0.6))
 			Art.text(ci, Vector2(552, 670), nm, 20, Color.WHITE)
 		_painter(Rect2(0, 0, 1280, 720), who, true, bg)
 		var change := _button("Cambiar", _show_profiles, 14)
 		change.position = Vector2(712, 636)
 		bg.add_child(change)
 	elif profiles.size() > 1:
-		var change := _button("Elegir cocinero", _show_profiles, 14)
+		var change := _button("Elegir perfil", _show_profiles, 14)
 		change.position = Vector2(570, 636)
 		bg.add_child(change)
 	var reset := _button("Borrar partida", _reset_progress, 13)
@@ -3704,10 +3704,12 @@ var profile_prefix := "user://progreso_"     # archivo de partida de cada perfil
 const MAX_PROFILES := 4
 ## Opciones del cocinero: [clave, título, [[nombre, valor], ...]]
 const COOK_OPTIONS := [
+	["tipo", "Perfil", [["Masculino", "m"], ["Femenino", "f"]]],
 	["piel", "Piel", [["Muy clara", 0], ["Clara", 1], ["Trigueña", 2], ["Morena", 3], ["Oscura", 4], ["Muy oscura", 5]]],
 	["pelo", "Pelo", [["Negro", 0], ["Castaño oscuro", 1], ["Castaño", 2], ["Rubio oscuro", 3], ["Rubio", 4],
 		["Canoso", 5], ["Colorado", 6], ["Azabache", 7]]],
-	["peinado", "Peinado", [["Corto", 0], ["Largo", 1], ["Rulos", 2], ["Rodete", 3], ["Pelado", 4], ["Punk", 6]]],
+	["peinado", "Peinado", [["Corto", 0], ["Largo", 1], ["Rulos", 2], ["Rodete", 3], ["Pelado", 4], ["Punk", 6],
+		["Melena", 8], ["Cola de caballo", 9], ["Trenza", 10]]],   # los nuevos van al final para no cambiar perfiles ya hechos
 	["gorro", "Gorro", [["De chef", "toque"], ["Pañuelo", "bandana"], ["Gorra", "gorra"], ["Sin gorro", ""]]],
 	["gorro_color", "Color del gorro", [["Blanco", Color("f4f1ea")], ["Rojo", Color("c8463c")], ["Azul", Color("3d6fb0")],
 		["Verde", Color("3f8f5a")], ["Negro", Color("2b2b30")], ["Amarillo", Color("e6b83a")]]],
@@ -3728,6 +3730,7 @@ var edit_new := false
 var edit_name_field: LineEdit = null
 var edit_value_labels := {}
 var delete_armed := ""            # id del perfil que se está por borrar (segundo toque)
+var profile_title: Label = null       # título de la pantalla de perfil (se adapta a cocinero/cocinera)
 
 
 func _default_cook() -> Dictionary:
@@ -3767,6 +3770,7 @@ func _cook_look(cook: Dictionary) -> Dictionary:
 		"jacket": true,
 		"scarf": _cook_value(cook, "panuelo"),
 		"apron": apron != null,
+		"fem": _cook_value(cook, "tipo") == "f",
 	}
 	if apron != null:
 		look["apron_color"] = apron
@@ -3879,6 +3883,7 @@ func _profile_bg(title: String) -> Control:
 	var p := _painter(Rect2(0, 0, 1280, 720), draw_bg, false, bg)
 	p.mouse_filter = Control.MOUSE_FILTER_STOP
 	var t := _label(title, 34, Color.WHITE, 6)
+	profile_title = t
 	t.position = Vector2(0, 18)
 	t.size = Vector2(1280, 50)
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -3894,7 +3899,7 @@ func _show_cook_editor(is_new: bool) -> void:
 	if is_new:
 		edit_cook["gorro"] = 0       # de entrada, con gorro de chef
 	delete_armed = ""
-	var bg := _profile_bg("Nuevo cocinero" if is_new and not profiles.is_empty() else "Tu cocinero")
+	var bg := _profile_bg("")
 	# Izquierda: el cocinero grande, con el nombre abajo
 	var preview := func(ci, t):
 		var look := _cook_look(edit_cook)
@@ -3922,7 +3927,7 @@ func _show_cook_editor(is_new: bool) -> void:
 	name_row.add_child(nl)
 	edit_name_field = LineEdit.new()
 	edit_name_field.text = "" if is_new else String(profile.get("name", ""))
-	edit_name_field.placeholder_text = "Tu nombre de cocinero"
+	edit_name_field.placeholder_text = "Tu nombre"
 	edit_name_field.max_length = 16
 	edit_name_field.custom_minimum_size = Vector2(360, 42)
 	edit_name_field.add_theme_font_size_override("font_size", 20)
@@ -3986,6 +3991,12 @@ func _cook_randomize() -> void:
 
 
 func _refresh_cook_labels() -> void:
+	if profile_title != null and is_instance_valid(profile_title):
+		var fem: bool = _cook_value(edit_cook, "tipo") == "f"
+		if edit_new and not profiles.is_empty():
+			profile_title.text = "Nueva cocinera" if fem else "Nuevo cocinero"
+		else:
+			profile_title.text = "Tu cocinera" if fem else "Tu cocinero"
 	for opt in COOK_OPTIONS:
 		var key: String = opt[0]
 		if edit_value_labels.has(key) and is_instance_valid(edit_value_labels[key]):
@@ -4080,7 +4091,7 @@ func _show_profiles() -> void:
 		var draw_new := func(ci, _t):
 			Art.rrect(ci, Rect2(nx, 104, cw, 470), Color(1, 1, 1, 0.12), 14, Color(1, 1, 1, 0.6), 3)
 			Art.text(ci, Vector2(nx, 330), "+", 90, Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_CENTER, cw)
-			Art.text(ci, Vector2(nx, 400), "Nuevo cocinero", 22, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, cw, 4)
+			Art.text(ci, Vector2(nx, 400), "Nuevo perfil", 22, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, cw, 4)
 		_painter(Rect2(0, 0, 1280, 720), draw_new, false, bg)
 		var add := _button("Crear", _show_cook_editor.bind(true), 18)
 		add.position = Vector2(nx + 20, 506)
@@ -4089,7 +4100,7 @@ func _show_profiles() -> void:
 	var back := _button("Volver", _show_title, 16)
 	back.position = Vector2(20, 660)
 	bg.add_child(back)
-	var note := _label("Cada cocinero tiene su propia partida, guardada en este dispositivo.", 15, Color.WHITE, 4)
+	var note := _label("Cada perfil tiene su propia partida, guardada en este dispositivo.", 15, Color.WHITE, 4)
 	note.position = Vector2(0, 664)
 	note.size = Vector2(1280, 30)
 	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

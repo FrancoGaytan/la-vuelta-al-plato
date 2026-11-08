@@ -1954,6 +1954,9 @@ static func draw_character(ci: CanvasItem, look: Dictionary, pos: Vector2, s: fl
 	var sd: int = look.get("seed", 0)
 	var breathe := sin(time * 2.2 + sd) * 1.2
 	var w: float = look.get("w", 1.0)
+	var fem: bool = look.get("fem", false)
+	if fem:
+		w *= 0.93       # hombros un poco más finos
 	var skin: Color = look["skin"]
 	var hair: Color = look["hair"]
 	var shirt: Color = look["shirt"]
@@ -2001,6 +2004,15 @@ static func draw_character(ci: CanvasItem, look: Dictionary, pos: Vector2, s: fl
 	# Pelo largo (atrás de la cabeza)
 	if style == 1:
 		rrect(ci, Rect2(hc.x - 35 * s, hc.y - 20 * s, 70 * s, 66 * s), hair, 28 * s)
+	elif style == 8:
+		# Melena: hasta el mentón, recta
+		rrect(ci, Rect2(hc.x - 36 * s, hc.y - 22 * s, 72 * s, 50 * s), hair, 20 * s)
+	elif style == 9:
+		# Cola de caballo que asoma por atrás, hacia un costado
+		var tail := PackedVector2Array([hc + Vector2(20, -24) * s, hc + Vector2(46, -16) * s, hc + Vector2(52, 14) * s,
+			hc + Vector2(44, 40) * s, hc + Vector2(36, 18) * s, hc + Vector2(30, -6) * s])
+		ci.draw_colored_polygon(tail, hair)
+		ci.draw_line(hc + Vector2(42, -8) * s, hc + Vector2(46, 26) * s, Color(hair.lightened(0.3), 0.5), 2 * s)
 
 	# Orejas y cabeza
 	ci.draw_circle(hc + Vector2(-30, 2) * s, 7 * s, skin.darkened(0.08))
@@ -2033,16 +2045,23 @@ static func draw_character(ci: CanvasItem, look: Dictionary, pos: Vector2, s: fl
 			b_out.y += 2 * s
 		ci.draw_line(hc + b_in, hc + b_out, hair.darkened(0.2), 2.6 * s)
 	ci.draw_circle(hc + Vector2(0, 8) * s, 3.6 * s, skin.darkened(0.15))
+	# Pestañas (perfil femenino)
+	if fem and not blink:
+		for side in [-1, 1]:
+			var e: Vector2 = hc + Vector2(side * 11, 0) * s
+			ci.draw_line(e + Vector2(side * 3, -3) * s, e + Vector2(side * 7, -6) * s, INK, 1.6 * s)
+			ci.draw_line(e + Vector2(side * 1, -4) * s, e + Vector2(side * 3, -8) * s, INK, 1.4 * s)
+	var lip: Color = Color("c2455a") if fem else INK
 	var mouth := hc + Vector2(0, 16) * s
 	match mood:
 		0:
-			ci.draw_arc(mouth + Vector2(0, -4) * s, 9 * s, 0.15 * PI, 0.85 * PI, 14, INK, 2.6 * s)
+			ci.draw_arc(mouth + Vector2(0, -4) * s, 9 * s, 0.15 * PI, 0.85 * PI, 14, lip, (3.2 if fem else 2.6) * s)
 			ci.draw_circle(hc + Vector2(-19, 10) * s, 5 * s, Color(1, 0.45, 0.45, 0.35))
 			ci.draw_circle(hc + Vector2(19, 10) * s, 5 * s, Color(1, 0.45, 0.45, 0.35))
 		1:
-			ci.draw_line(mouth + Vector2(-7, 0) * s, mouth + Vector2(7, 0) * s, INK, 2.6 * s)
+			ci.draw_line(mouth + Vector2(-7, 0) * s, mouth + Vector2(7, 0) * s, lip, (3.2 if fem else 2.6) * s)
 		_:
-			ci.draw_arc(mouth + Vector2(0, 8) * s, 9 * s, 1.15 * PI, 1.85 * PI, 14, INK, 2.6 * s)
+			ci.draw_arc(mouth + Vector2(0, 8) * s, 9 * s, 1.15 * PI, 1.85 * PI, 14, lip, (3.2 if fem else 2.6) * s)
 
 	# Accesorios
 	match int(look.get("acc", 0)):
@@ -2141,6 +2160,24 @@ static func _draw_hair(ci: CanvasItem, look: Dictionary, hc: Vector2, s: float, 
 			spikes.append(hc + Vector2(31, -4) * s)
 			spikes.append(hc + Vector2(0, -12) * s)
 			ci.draw_colored_polygon(spikes, hair)
+		8:
+			# Melena con flequillo recto
+			ci.draw_colored_polygon(cap_pts, hair)
+			rrect(ci, Rect2(hc + Vector2(-27, -24) * s, Vector2(54, 15) * s), hair, 6 * s)
+			ci.draw_arc(hc + Vector2(0, -2) * s, 26 * s, PI * 1.18, PI * 1.5, 10, Color(hair.lightened(0.35), 0.5), 3 * s)
+		9:
+			# Cola de caballo: pelo tirante y una gomita
+			ci.draw_colored_polygon(cap_pts, hair)
+			ci.draw_circle(hc + Vector2(32, -18) * s, 5 * s, Color("d9534a"))
+			ci.draw_arc(hc + Vector2(0, -2) * s, 26 * s, PI * 1.2, PI * 1.45, 10, Color(hair.lightened(0.35), 0.5), 3 * s)
+		10:
+			# Trenza que cae sobre el hombro
+			ci.draw_colored_polygon(cap_pts, hair)
+			for k in 6:
+				var p: Vector2 = hc + Vector2(27 + k * 1.5 + (2 if k % 2 == 0 else -2), 14 + k * 11) * s
+				ellipse(ci, p, Vector2(7.5 - k * 0.5, 6.5) * s, hair)
+				ci.draw_line(p + Vector2(-5, -3) * s, p + Vector2(4, 3) * s, hair.darkened(0.25), 1.3 * s)
+			ci.draw_circle(hc + Vector2(36, 80) * s, 3.5 * s, Color("d9534a"))
 		7:
 			ci.draw_colored_polygon(cap_pts, hair)
 			var hat := Color("fbfbf8")
