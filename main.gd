@@ -182,6 +182,13 @@ var pipe = null                       # el éclair que se está decorando {flavo
 var masala_pan = null                  # India: el masala que se está haciendo {spices}
 var sushi_roll = null                  # Japón: el maki que se está armando {stage, rice, fillings, rolled, cuts}
 var sushi_view = null
+var tips_on := true                   # consejos para el que juega por primera vez
+var tips_seen: Array = []             # consejos que ya se mostraron (por perfil)
+var tip_refs := {}                    # cosas de la pantalla a las que puede señalar un consejo
+var tip_view: Control = null
+var tip_id := ""
+var tip_age := 0.0
+var tip_check := 0.0
 var critic_at := -1                  # qué cliente del día es el crítico de la guía (-1 = hoy no viene)
 var critic_score := -1.0             # nota que le dio al plato (-1 = todavía no comió)
 var critic_name := ""
@@ -613,6 +620,7 @@ func _build_sink_station() -> void:
 	# Esponja y detergente
 	var soap_now := sponge_soap
 	var sponge := _prop(Rect2(830, 56, 130, 100))
+	tip_refs["esponja"] = sponge
 	sponge.draw_fn = func(ci, r): Art.draw_sponge(ci, r.grow(-8), 0.0, soap_now)
 	sponge.text = "Esponja" if sponge_soap > 0.0 else "Esponja (seca)"
 	sponge.text_size = 12
@@ -620,12 +628,14 @@ func _build_sink_station() -> void:
 	sponge.tooltip_text = "Mantené apretado y frotá sobre las manchas"
 	sponge.held.connect(_start_scrub)
 	var soap := _prop(Rect2(845, 172, 100, 130))
+	tip_refs["detergente"] = soap
 	soap.draw_fn = func(ci, r): Art.draw_detergent(ci, r.grow(-6), 0.7)
 	soap.text = "Detergente"
 	soap.text_size = 12
 	soap.tooltip_text = "Tocalo para cargar la esponja"
 	soap.pressed.connect(_load_soap)
 	var faucet := _button("Cerrar grifo" if water_on else "Abrir grifo", _toggle_water, 14)
+	tip_refs["grifo"] = faucet
 	faucet.position = Vector2(836, 330)
 	station_box.add_child(faucet)
 	# Derecha: el escurridor
@@ -664,6 +674,7 @@ func _toggle_pause() -> void:
 		return
 	paused = true
 	_end_sprinkle()
+	_hide_tip(false)
 	for key in cook_players:
 		cook_players[key].stream_paused = true
 	var box := _open_overlay()
@@ -673,6 +684,9 @@ func _toggle_pause() -> void:
 	var go := _button("Seguir cocinando", _resume, 22)
 	go.custom_minimum_size = Vector2(320, 56)
 	box.add_child(go)
+	var tb := _button("Consejos: " + ("sí" if tips_on else "no"), _toggle_tips, 16)
+	tb.tooltip_text = "Ayudas para el que juega por primera vez"
+	box.add_child(tb)
 	box.add_child(_button("Reiniciar el día", _restart_from_pause, 18))
 	box.add_child(_button("Salir al menú", _quit_from_pause, 18))
 	_update_pause_button()
@@ -733,6 +747,8 @@ func _update_music_button() -> void:
 
 func _process(delta: float) -> void:
 	if not playing:
+		if tip_view != null:
+			_hide_tip(false)
 		if close_button != null and close_button.visible:
 			close_button.visible = false
 		if not cook_players.is_empty() or water_player != null:
@@ -747,6 +763,7 @@ func _process(delta: float) -> void:
 	_update_washing(delta)
 	_update_pour(delta)
 	knead_sound_t -= delta
+	_update_tips(delta)
 	elapsed += delta
 
 	if spawned < level["customers"]:
@@ -869,6 +886,8 @@ func _load_progress() -> void:
 		owned = cfg.get_value("progreso", "mejoras_compradas", [])
 		music_on = cfg.get_value("opciones", "musica", true)
 		sfx_on = cfg.get_value("opciones", "sonidos", true)
+		tips_on = cfg.get_value("opciones", "consejos", true)
+		tips_seen = cfg.get_value("ayuda", "vistos", [])
 		country_progress = cfg.get_value("paises", "progreso", {})
 		owned_countries = cfg.get_value("paises", "locales", ["argentina"])
 		current_country = cfg.get_value("paises", "actual", "argentina")
@@ -891,11 +910,15 @@ func _save_progress() -> void:
 	cfg.set_value("paises", "actual", current_country)
 	cfg.set_value("opciones", "musica", music_on)
 	cfg.set_value("opciones", "sonidos", sfx_on)
+	cfg.set_value("opciones", "consejos", tips_on)
+	cfg.set_value("ayuda", "vistos", tips_seen)
 	cfg.save(save_path)
 
 
 func _reset_progress() -> void:
 	savings = 0
+	tips_seen = []
+	tips_on = true
 	owned = []
 	country_progress = {}
 	owned_countries = ["argentina"]
@@ -1394,7 +1417,11 @@ func _show_intro(i: int) -> void:
 		"creperie": step3 = "3. Crêperie: esparcí la masa de crêpe en círculos y mandala a la crepera; con la manga se decoran los éclairs.\n"
 		"especiero": step3 = "3. Especiero: agregá las especias de la masala dabba en el orden exacto del ticket.\n"
 		"esterilla": step3 = "3. Esterilla: alga, arroz frotando, el relleno pedido, enrollá deslizando hacia arriba y cortá.\n"
-	if i == 0:
+	if i == 0 and tips_on:
+		# Con los consejos prendidos no hace falta la guía: se aprende jugando
+		tip = "Tomá el pedido, cociná, armá el plato, servilo y lavá lo sucio. No te preocupes: mientras jugás te van a ir apareciendo consejos justo cuando los necesitás (se pueden apagar en la pausa).\n" + \
+			"Teclas 1 a 6: cambiar de estación.\n\n" + tip
+	elif i == 0:
 		tip = "Cómo se juega:\n1. Pedidos: tomá el pedido del cliente del mostrador.\n" + \
 			"2. Cocina: arrastrá los ingredientes de la heladera al aparato y sacalos en su punto (click). Las carnes tienen termómetro. Lo de la plancha y la olla se sala con el salero.\n" + \
 			step3 + \
@@ -2790,6 +2817,7 @@ func _item_progress(o, item_id: String) -> String:
 
 func _refresh_station() -> void:
 	_clear(station_box)
+	tip_refs.clear()
 	customer_views.clear()
 	kitchen_views.clear()
 	mesa_view = null
@@ -2965,6 +2993,7 @@ func _build_kitchen_station() -> void:
 	_build_order_recipe(o, Rect2(12, top, rw, STATION_SIZE.y - top - 4.0))
 	# Salero: se mantiene apretado y se sacude encima de la plancha o la olla
 	var shaker := _prop(Rect2(12.0 + rw + 16.0, top, 84.0, STATION_SIZE.y - top - 4.0))
+	tip_refs["salero"] = shaker
 	shaker.draw_fn = func(ci, r): Art.salt_shaker(ci, r.get_center() + Vector2(0, 4), minf(r.size.y / 50.0, 1.6), -0.2, false, 0.0)
 	shaker.text = "Salero"
 	shaker.text_size = 12
@@ -3008,7 +3037,7 @@ func _build_kitchen_station() -> void:
 			Art.text(ci, Vector2(20, s[0] + 13), s[1].to_upper(), 11, Color("4a5560"))
 			ci.draw_rect(Rect2(8, s[2] - 4, fw - 16, 4), Color("c5ccd2"))
 	if n > 0:
-		_painter(Rect2(fx, 30, fw, 430), draw_fridge, false)
+		tip_refs["heladera"] = _painter(Rect2(fx, 30, fw, 430), draw_fridge, false)
 	else:
 		# Sin nada de la heladera: se explica de dónde sale lo que va acá
 		var msg := "Hoy no hace falta la heladera."
@@ -4525,6 +4554,7 @@ func _build_delivery_station() -> void:
 		_build_wine_corner(o)
 
 	var bell := _prop(Rect2(800, 330, 120, 126))
+	tip_refs["campanita"] = bell
 	bell.texture = Art.tex("kitchen/bell")
 	bell.text = "¡Servir!"
 	bell.text_size = 17
@@ -5046,6 +5076,8 @@ func _save_profiles() -> void:
 ## Vuelve todo al estado de una partida nueva (sin guardar)
 func _reset_state() -> void:
 	savings = 0
+	tips_seen = []
+	tips_on = true
 	owned = []
 	country_progress = {}
 	owned_countries = ["argentina"]
@@ -5361,3 +5393,213 @@ func _delete_profile(p: Dictionary) -> void:
 			save_path = SAVE_PATH
 	_save_profiles()
 	_show_profiles()
+
+
+
+# =====================================================================
+# Consejos para el que juega por primera vez: aparecen solos en el momento justo, una sola vez,
+# con una flecha a lo que hay que usar. Se van al hacerlo (o con "Entendido") y se apagan desde la pausa.
+# =====================================================================
+
+func _toggle_tips() -> void:
+	tips_on = not tips_on
+	if not tips_on:
+		_hide_tip(false)
+	_save_progress()
+	if paused:
+		_resume()
+		_toggle_pause()
+
+
+func _seen(id: String) -> bool:
+	return id in tips_seen
+
+
+func _tab(i: int) -> Control:
+	return tab_buttons[i] if i < tab_buttons.size() else null
+
+
+## El consejo que corresponde ahora: [id, texto, a qué señala] (o vacío si no hay ninguno)
+func _next_tip() -> Array:
+	var o: Variant = _get_order(selected_id)
+	var cooking := false
+	for a in cookers:
+		for s in cookers[a]:
+			if s != null:
+				cooking = true
+	# El cliente impaciente le gana a todo: es lo más urgente de entender
+	if not _seen("paciencia"):
+		for c in queue + orders:
+			if _mood(elapsed - c["arrived"]) >= 2:
+				var lbl = ticket_labels.get(c.get("id", -1))
+				return ["paciencia", "Este cliente se está impacientando: cuanto más espera, menos puntos te da. Si espera demasiado, se va sin comer.",
+					lbl if lbl != null and is_instance_valid(lbl) else _tab(0)]
+	if close_button != null and close_button.visible:
+		return ["cierre", "¡Atendiste a todos! Lavá lo que quedó sucio y después tocá acá para cerrar el día.", close_button]
+	match current_station:
+		0:
+			if not queue.is_empty() and orders.is_empty() and served == 0 and take_button != null and is_instance_valid(take_button):
+				return ["tomar", "Llegó tu primer cliente. Tocá acá para tomarle el pedido.", take_button]
+			if not orders.is_empty() and not cooking and prepared.is_empty() and served == 0:
+				if _prep() != "" and not _seen("prep_" + _prep()):
+					return ["prep_" + _prep(), "Esta cocina tiene su estación propia: %s (tecla 3). Ahí se prepara lo típico del país." % _prep_name(), _tab(2)]
+				return ["ir_cocina", "El pedido quedó anotado en el ticket de arriba. Andá a la Cocina (tecla 2) a prepararlo.", _tab(1)]
+		1:
+			for a in cookers:
+				for i in cookers[a].size():
+					var s = cookers[a][i]
+					if s == null:
+						continue
+					var info: Dictionary = Data.ITEMS[s["item"]]
+					var view := _appliance_view(a)
+					if info.get("salt", false) and float(s.get("salt", 0.0)) < Data.SALT_OK.x and tip_refs.has("salero") and not _seen("sal"):
+						return ["sal", "¡Esto lleva sal! Mantené apretado el salero y sacudilo encima de la comida hasta que la S se ponga verde.", tip_refs["salero"]]
+					if info.has("temps") and view != null and _seen("sal") and not _seen("termometro"):
+						return ["termometro", "Las carnes se sacan por temperatura: mirá el termómetro clavado en la carne y la receta de abajo.", view]
+					if s.get("flip", false) and view != null and not _seen("dar_vuelta"):
+						return ["dar_vuelta", "Se cocina el lado de abajo: tocala para darla vuelta cuando el cartel dice que la des vuelta.", view]
+					if a == "wok" and view != null and not _seen("saltear"):
+						return ["saltear", "Tocá el wok seguido para saltear: si lo dejás quieto, la comida se pega y se quema.", view]
+					if view != null and not _seen("sacar") and _doneness_progress(s) >= s["target"] - Data.ZONE * 0.5 and float(s["t"]) < float(s["burn"]):
+						return ["sacar", "¡Está en su punto! Tocá el cartelito para sacarlo a la bandeja antes de que se pase.", view]
+			if not cooking and prepared.is_empty() and o != null and tip_refs.has("heladera"):
+				return ["heladera", "Arrastrá el ingrediente desde la heladera hasta el aparato que corresponde. Abajo tenés la receta del pedido.", tip_refs["heladera"]]
+		3:
+			if o != null and plating_plate != null and is_instance_valid(plating_plate):
+				if o["plate"].is_empty() and not prepared.is_empty():
+					return ["al_plato", "Arrastrá lo de la bandeja (a la izquierda) hasta el plato. La salsa también se arrastra.", plating_plate]
+				var tops: Array = o["toppings"]
+				if not o["plate"].is_empty() and not tops.is_empty() and not Data.RECIPES[o["recipe"]].get("prebuilt", false) \
+						and o["plate_toppings"].size() < tops.size():
+					return ["toppings", "Para los toppings: mantené apretado el bowl y pasalo por arriba de la comida un par de segundos.", plating_plate]
+		4:
+			if o != null and not o["plate"].is_empty() and tip_refs.has("campanita"):
+				return ["campanita", "Cuando el plato está completo, tocá la campanita para servirlo.", tip_refs["campanita"]]
+		5:
+			if sink_item == null and not dirty.is_empty() and sink_view != null and is_instance_valid(sink_view):
+				return ["pileta", "Arrastrá lo sucio de la izquierda hasta la pileta (o tocalo).", sink_view]
+			if sink_item != null:
+				if not water_on and tip_refs.has("grifo") and not _seen("grifo"):
+					return ["grifo", "Abrí el grifo para lavar y enjuagar.", tip_refs["grifo"]]
+				if sponge_soap <= 0.0 and float(sink_item["dirt"]) > 0.0 and not sink_item.get("soaped", false) and tip_refs.has("detergente") and not _seen("detergente"):
+					return ["detergente", "Tocá el detergente para cargar la esponja: con una carga alcanza para una pieza entera.", tip_refs["detergente"]]
+				if float(sink_item["dirt"]) > 0.0 and tip_refs.has("esponja") and not _seen("frotar"):
+					return ["frotar", "Mantené apretada la esponja y frotá las manchas hasta que desaparezcan.", tip_refs["esponja"]]
+				if float(sink_item["dirt"]) <= 0.0 and sink_item["bubbles"].is_empty() and rack_view != null and is_instance_valid(rack_view):
+					return ["escurridor", "¡Limpio! Arrastralo al escurridor de la derecha.", rack_view]
+	# Avisos que llevan a otra estación
+	if o != null and not prepared.is_empty() and o["plate"].is_empty() and current_station in [0, 1, 2] and not _seen("ir_emplatado"):
+		return ["ir_emplatado", "Lo cocinado quedó en la bandeja. Armá el plato en Emplatado (tecla 4).", _tab(3)]
+	if o != null and o["plate"].size() >= o["items"].size() and current_station in [0, 1, 2, 5] and not _seen("ir_entrega"):
+		return ["ir_entrega", "El plato está listo: servilo en la Entrega (tecla 5).", _tab(4)]
+	if not dirty.is_empty() and current_station in [0, 1, 4] and not _seen("ir_bacha"):
+		return ["ir_bacha", "Quedó algo sucio. Si no lavás, te quedás sin platos limpios: lavá en la Bacha (tecla 6) cuando tengas un rato.", _tab(5)]
+	return []
+
+
+func _appliance_view(a: String) -> Control:
+	for v in kitchen_views:
+		if is_instance_valid(v) and v.kind == a:
+			return v
+	return null
+
+
+func _update_tips(delta: float) -> void:
+	if not tips_on or intro_t >= 0.0:
+		return
+	if tip_view != null:
+		tip_age += delta
+		_place_tip()
+	tip_check -= delta
+	if tip_check > 0.0:
+		return
+	tip_check = 0.25
+	var want := _next_tip()
+	if not want.is_empty() and _seen(want[0]):
+		want = []
+	if want.is_empty() or want[2] == null or not is_instance_valid(want[2]):
+		if tip_view != null:
+			_hide_tip(true)     # se resolvió (o se fue a otra cosa): ya lo vio
+		return
+	if want[0] != tip_id:
+		if tip_view != null:
+			_hide_tip(true)
+		_show_tip(want[0], want[1], want[2])
+	else:
+		tip_view.set_meta("target", want[2])
+
+
+func _show_tip(id: String, text: String, target: Control) -> void:
+	tip_id = id
+	tip_age = 0.0
+	var v := Control.new()
+	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.z_index = 45
+	v.set_meta("target", target)
+	add_child(v)
+	tip_view = v
+	# Anillo que late alrededor de lo que hay que usar, y la flecha
+	var ring := Painter.new()
+	ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ring.animate = true
+	ring.fps = 30.0
+	ring.fn = func(ci, t):
+		var tg = v.get_meta("target")
+		var bubble: Control = v.get_node_or_null("Globo")
+		if tg == null or not is_instance_valid(tg) or bubble == null:
+			return
+		var r: Rect2 = tg.get_global_rect()
+		var pulse := 0.5 + 0.5 * sin(t * 6.0)
+		Art.rrect(ci, r.grow(6 + pulse * 4), Color(0, 0, 0, 0), 12, Color(1, 0.82, 0.25, 0.55 + 0.45 * pulse), 4)
+		var b := bubble.get_global_rect()
+		var above := b.end.y < r.position.y
+		var from := Vector2(clampf(r.get_center().x, b.position.x + 20, b.end.x - 20), b.end.y if above else b.position.y)
+		var to := Vector2(r.get_center().x, r.position.y - 8 if above else r.end.y + 8)
+		if from.distance_to(to) > 12.0:
+			ci.draw_line(from, to, Color("ffd166"), 4)
+			var dir := (to - from).normalized()
+			ci.draw_colored_polygon(PackedVector2Array([to, to - dir * 16 + dir.orthogonal() * 9, to - dir * 16 - dir.orthogonal() * 9]), Color("ffd166"))
+	v.add_child(ring)
+	var panel := PanelContainer.new()
+	panel.name = "Globo"
+	panel.add_theme_stylebox_override("panel", _sb(Color("fff6dc"), Color("e0a82e"), 12, 3))
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	v.add_child(panel)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	panel.add_child(row)
+	var l := _label(text, 16, COL_INK)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(320, 0)
+	row.add_child(l)
+	var ok := _button("Entendido", _hide_tip.bind(true), 13)
+	ok.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(ok)
+	_place_tip()
+
+
+## El globo va arriba o abajo de lo que señala, sin taparlo y sin salirse de la pantalla
+func _place_tip() -> void:
+	if tip_view == null:
+		return
+	var tg = tip_view.get_meta("target")
+	var panel: Control = tip_view.get_node_or_null("Globo")
+	if tg == null or not is_instance_valid(tg) or panel == null:
+		return
+	var r: Rect2 = tg.get_global_rect()
+	var sz := panel.get_combined_minimum_size()
+	var vs := get_viewport_rect().size
+	var y := r.position.y - sz.y - 30.0
+	if y < 50.0:
+		y = minf(r.end.y + 30.0, vs.y - sz.y - 8.0)
+	panel.position = Vector2(clampf(r.get_center().x - sz.x / 2.0, 8.0, vs.x - sz.x - 8.0), y)
+
+
+func _hide_tip(mark_seen := true) -> void:
+	if tip_view != null and is_instance_valid(tip_view):
+		tip_view.queue_free()
+	if mark_seen and tip_id != "" and not tip_id in tips_seen:
+		tips_seen.append(tip_id)
+	tip_view = null
+	tip_id = ""
