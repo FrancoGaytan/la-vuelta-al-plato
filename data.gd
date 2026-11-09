@@ -27,8 +27,8 @@ const TOOLS := {
 }
 # Heladera de la cocina: los ingredientes van agrupados por tipo
 const FRIDGE_GROUPS := [
-	["Carnes", ["milanesa", "bife", "pollo", "hamburguesa", "carne_asada", "pastor"]],
-	["Pastas, arroz y granos", ["spaghetti", "noquis", "ravioles", "fettuccine", "arroz", "frijoles"]],
+	["Carnes", ["milanesa", "bife", "pollo", "hamburguesa", "carne_asada", "pastor", "tikka"]],
+	["Pastas, arroz y granos", ["spaghetti", "noquis", "ravioles", "fettuccine", "arroz", "frijoles", "garbanzos", "naan"]],
 	["Verduras", ["papas_fritas", "calabaza", "berenjena", "morron", "aros_cebolla", "champinones"]],
 	["Dulces", ["panqueque", "churros", "malteada_choco", "malteada_frutilla", "malteada_vainilla", "croissant"]],
 ]
@@ -116,8 +116,9 @@ const APPLIANCES := {
 	"comal": {"name": "Comal", "slots": 4},             # México: las tortillas se dan vuelta a mano
 	"licuadora": {"name": "Licuadora", "slots": 2},        # EE.UU.: malteadas (si se pasa, queda aguada)
 	"crepera": {"name": "Crepera", "slots": 2},          # Francia: la crêpe se da vuelta a mano
+	"tandoor": {"name": "Tandoor", "slots": 3},          # India: horno de barro
 }
-const APPLIANCE_ORDER := ["comal", "crepera", "olla", "plancha", "freidora", "horno", "horno_lena", "licuadora"]
+const APPLIANCE_ORDER := ["comal", "crepera", "olla", "plancha", "freidora", "horno", "horno_lena", "licuadora", "tandoor"]
 
 # kind: "cook" se cocina en un aparato (target = segundos ideales, burn = se quema)
 #       "chop" se corta en la tabla (cuts = cantidad de cortes)
@@ -178,6 +179,12 @@ const ITEMS := {
 	"jamon": {"name": "Jamón", "kind": "ready"},
 	"croissant": {"name": "Croissant", "kind": "cook", "where": "horno", "target": 9.0, "burn": 15.0},
 	"eclair": {"name": "Éclair", "kind": "assembled"},
+	# India. El masala se arma en el Especiero agregando las especias en el orden del ticket ("assembled")
+	"masala": {"name": "Masala", "kind": "assembled"},
+	"garbanzos": {"name": "Garbanzos", "kind": "cook", "where": "olla", "salt": true, "target": 9.0, "burn": 16.0},
+	"naan": {"name": "Naan", "kind": "cook", "where": "tandoor", "target": 4.0, "burn": 8.0},
+	"tikka": {"name": "Pollo tikka", "kind": "cook", "where": "tandoor", "target": 9.0, "burn": 15.0,
+		"temps": [[0, 5], [9, 74], [15, 95]], "target_temp": 74},
 }
 
 # parts: cada parte es una lista de opciones; el cliente elige una por parte.
@@ -246,6 +253,13 @@ const RECIPES := {
 		"toppings": ["Manteca", "Mermelada"], "min_toppings": 1},
 	"eclair": {"name": "Éclair", "cat": "Pâtisserie", "parts": [["eclair"]], "prebuilt": true, "piped": true,
 		"sauces": ["Chocolate", "Café", "Frutilla"], "toppings": []},
+	# India. "spiced": el cliente pide las especias del masala en un orden exacto
+	"curry_pollo": {"name": "Curry de pollo", "cat": "Currys", "parts": [["masala"], ["pollo"], ["arroz"]], "spiced": true,
+		"sauces": [], "toppings": ["Cilantro", "Yogur"]},
+	"tikka": {"name": "Pollo tikka con naan", "cat": "Tandoor", "parts": [["tikka"], ["naan"]],
+		"sauces": ["Raita", "Chutney de menta"], "toppings": ["Cebolla morada", "Limón"]},
+	"chana": {"name": "Chana masala", "cat": "Currys", "parts": [["masala"], ["garbanzos"], ["arroz", "naan"]], "spiced": true,
+		"sauces": [], "toppings": ["Cilantro", "Limón"]},
 }
 
 # Cada día suma recetas nuevas al menú y sube la dificultad.
@@ -318,6 +332,21 @@ const FRANCE_LEVELS := [
 const CREPE_SPREAD_TURNS := 3.0   # vueltas con el rastrillo para cubrir toda la crêpière
 const PIPE_FLAVORS := {"Chocolate": Color("4a2412"), "Café": Color("a0703a"), "Frutilla": Color("f28aa8")}
 
+
+# Días de Masala Express (Mumbai)
+const INDIA_LEVELS := [
+	{"name": "Din 1 · Curry de la casa", "new": ["curry_pollo"], "customers": 5,
+		"interval": [28.0, 34.0], "patience": 110.0, "max_toppings": 2, "show_zone": true,
+		"tip": "El masala se arma en el Especiero (tecla 3): tocá las latitas de la masala dabba en el orden EXACTO del ticket. Cada especia tiene su momento: si el orden cambia, el sabor no es el mismo."},
+	{"name": "Din 2 · El tandoor", "new": ["tikka"], "customers": 6,
+		"interval": [26.0, 32.0], "patience": 110.0, "max_toppings": 2, "show_zone": true,
+		"tip": "El tandoor es un horno de barro: el naan se pega en la pared y el pollo tikka se mide con el termómetro."},
+	{"name": "Din 3 · Thali completo", "new": ["chana"], "customers": 8, "drinks": true,
+		"interval": [25.0, 31.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
+]
+const SPICES := {"Comino": Color("8a6a3a"), "Cúrcuma": Color("f2b01d"), "Jengibre": Color("e8c88a"),
+	"Garam masala": Color("7a3a1e"), "Chile": Color("c8281a"), "Cardamomo": Color("6a8a3a")}
+
 # Molcajete (México): ingredientes de cada salsa y cuántas vueltas de mano hacen falta para molerla
 const MOLCAJETE := {
 	"Salsa verde": ["tomatillo", "chile", "cilantro"],
@@ -363,8 +392,10 @@ const COUNTRIES := {
 		"drinks": ["Agua", "Vino tinto", "Limonada", "Naranja"]},
 	"india": {"name": "India", "city": "Mumbai", "restaurant": "Masala Express", "lon": 72.8, "lat": 19.0,
 		"flag": ["h", [Color("ff9933"), Color("ffffff"), Color("138808")]],
-		"cuisine": "Curry, naan y lassi", "cooking": "Especias en orden y horno tandoor",
-		"price": 9000, "stars_needed": 5, "ready": false, "levels": []},
+		"cuisine": "Currys, pollo tikka, naan y lassi", "cooking": "Masala dabba con las especias en orden y horno tandoor",
+		"price": 9000, "stars_needed": 5, "ready": true, "levels": INDIA_LEVELS, "prep": "especiero",
+		"names": ["Priya", "Raj", "Anjali", "Vikram", "Aarav", "Meera", "Rohan", "Nani Kamala", "Arjun", "Kavya", "Dev", "Isha"],
+		"drinks": ["Agua", "Lassi de mango", "Chai", "Limonada"]},
 	"japon": {"name": "Japón", "city": "Tokio", "restaurant": "Sakura Ramen", "lon": 139.7, "lat": 35.7,
 		"flag": ["circulo", [Color("ffffff"), Color("bc002d")]],
 		"cuisine": "Sushi, ramen y yakisoba", "cooking": "Esterilla de sushi y wok",
@@ -412,6 +443,8 @@ const DRINKS := {
 	"Vino tinto": {"color": Color("6e0f22"), "label": Color("efe4c8"), "kind": "vino"},   # se sirve en copa: hay que llenarla con la botella
 	"Agua de jamaica": {"color": Color("a3123f"), "label": Color("f6c6d6"), "kind": "botella"},
 	"Horchata": {"color": Color("f1e8d6"), "label": Color("b07a3a"), "kind": "botella"},
+	"Lassi de mango": {"color": Color("f6b84a"), "label": Color("e8702a"), "kind": "botella"},
+	"Chai": {"color": Color("c89a6a"), "label": Color("7a3a1e"), "kind": "botella"},
 }
 
 # Pasta fresca (Italia): se amasa a mano en la Mesa. Lo que lleva "fresh" en ITEMS no está en la heladera

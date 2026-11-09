@@ -48,6 +48,8 @@ func _center(i: int) -> Vector2:
 			return [Vector2(62, 150), Vector2(174, 150)][i]
 		"crepera":
 			return [Vector2(118, 82), Vector2(118, 222)][i]
+		"tandoor":
+			return [Vector2(66, 108), Vector2(170, 108), Vector2(118, 226)][i]
 	return Vector2(64, 108 + i * 84)
 
 
@@ -63,6 +65,8 @@ func _basket_y(i: int) -> float:
 func _food_rect(i: int) -> Rect2:
 	var c := _center(i)
 	match kind:
+		"tandoor":
+			return Rect2(c - Vector2(36, 34), Vector2(72, 68))
 		"crepera":
 			return Rect2(c - Vector2(54, 54), Vector2(108, 108))
 		"licuadora":
@@ -83,6 +87,8 @@ func _food_rect(i: int) -> Rect2:
 func _chip_rect(i: int) -> Rect2:
 	var c := _center(i)
 	match kind:
+		"tandoor":
+			return Rect2(c.x - 50, c.y + 36, 100, 28)
 		"crepera":
 			return Rect2(c.x + 30, c.y + 34, 88, 28)
 		"licuadora":
@@ -102,6 +108,8 @@ func _chip_rect(i: int) -> Rect2:
 
 func _hit_rect(i: int) -> Rect2:
 	match kind:
+		"tandoor":
+			return Rect2(_center(i) - Vector2(50, 40), Vector2(100, 108))
 		"crepera":
 			return Rect2(_center(i) - Vector2(66, 66), Vector2(184, 132))
 		"licuadora":
@@ -173,6 +181,7 @@ func _draw() -> void:
 		"comal": _draw_comal(t)
 		"licuadora": _draw_blenders(t)
 		"crepera": _draw_crepera(t)
+		"tandoor": _draw_tandoor(t)
 	for i in slots.size():
 		if slots[i] != null:
 			_draw_chip(_chip_rect(i), slots[i], t)
@@ -785,3 +794,29 @@ func _draw_crepera(t: float) -> void:
 			if s["ta"] > s["target"] * 0.8:
 				Art.steam(self, c + Vector2(0, -20), t, 0.6 if not _burning(s) else 1.6, i + 11,
 					Color.WHITE if maxf(s["ta"], s["tb"]) < s["burn"] else Color(0.3, 0.3, 0.3))
+
+
+## Tandoor (India): horno de barro visto desde arriba, con las brasas en el fondo
+func _draw_tandoor(t: float) -> void:
+	Art.rrect(self, Rect2(0, 0, 236, 330), Color("c8864a"), 18, Color("8a5a2b"), 4)
+	for k in 6:
+		draw_line(Vector2(8, 50 + k * 50), Vector2(228, 54 + k * 50), Color(0, 0, 0, 0.08), 3)
+	var c := Vector2(118, 160)
+	draw_circle(c + Vector2(4, 6), 112, Color(0, 0, 0, 0.25))
+	draw_circle(c, 112, Color("a8663a"))
+	draw_circle(c, 100, Color("5a2a14"))
+	# Pared interior que se calienta hacia el fondo y brasas
+	for k in 6:
+		draw_circle(c, 96.0 - k * 14.0, Color(0.35 + k * 0.1, 0.12 + k * 0.05, 0.05, 1.0))
+	for k in 10:
+		var a := k * 0.63 + t * 0.2
+		var fl := 0.6 + 0.4 * sin(t * 6.0 + k)
+		draw_circle(c + Vector2.from_angle(a) * 18.0, 6.0 + fl * 3.0, Color(1.0, 0.4 + 0.3 * fl, 0.1, 0.9))
+	draw_circle(c, 10, Color(1, 0.85, 0.4, 0.8))
+	for i in slots.size():
+		var s = slots[i]
+		if s == null:
+			continue
+		_food(i, s)
+		Art.steam(self, _center(i) + Vector2(0, -16), t, 0.6 if not _burning(s) else 1.6, i + 13,
+			Color.WHITE if s["t"] < s["burn"] else Color(0.3, 0.3, 0.3))

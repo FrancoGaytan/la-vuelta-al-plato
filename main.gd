@@ -87,6 +87,7 @@ const COOK_SFX := {
 	"comal": ["res://assets/sfx/chisporroteo.wav", -24.0],     # la tortilla chisporrotea apenas
 	"licuadora": ["res://assets/sfx/licuadora.wav", -20.0],
 	"crepera": ["res://assets/sfx/chisporroteo.wav", -26.0],
+	"tandoor": ["res://assets/sfx/horno.wav", -22.0],
 }
 
 # Sonidos sueltos: archivo y volumen (dB)
@@ -176,6 +177,7 @@ var burger_stack = null               # EE.UU.: la hamburguesa que se está arma
 var crepe_mode := "crepes"             # Francia: la Crêperie sirve para esparcir crêpes o para la manga
 var crepe_batter = null               # la crêpe que se está esparciendo {spread}
 var pipe = null                       # el éclair que se está decorando {flavor, pts, covered, mess}
+var masala_pan = null                  # India: el masala que se está haciendo {spices}
 var critic_at := -1                  # qué cliente del día es el crítico de la guía (-1 = hoy no viene)
 var critic_score := -1.0             # nota que le dio al plato (-1 = todavía no comió)
 var critic_name := ""
@@ -1379,6 +1381,7 @@ func _show_intro(i: int) -> void:
 		"tortilleria": step3 = "3. Tortillería: prensá las tortillas y mandalas al comal; en el molcajete se muelen las salsas.\n"
 		"armado": step3 = "3. Armado: apilá la hamburguesa capa por capa en el orden exacto del ticket.\n"
 		"creperie": step3 = "3. Crêperie: esparcí la masa de crêpe en círculos y mandala a la crepera; con la manga se decoran los éclairs.\n"
+		"especiero": step3 = "3. Especiero: agregá las especias de la masala dabba en el orden exacto del ticket.\n"
 	if i == 0:
 		tip = "Cómo se juega:\n1. Pedidos: tomá el pedido del cliente del mostrador.\n" + \
 			"2. Cocina: arrastrá los ingredientes de la heladera al aparato y sacalos en su punto (click). Las carnes tienen termómetro. Lo de la plancha y la olla se sala con el salero.\n" + \
@@ -1445,6 +1448,7 @@ func _start_level(i: int) -> void:
 	crepe_mode = "crepes"
 	crepe_batter = null
 	pipe = null
+	masala_pan = null
 	mesa_pizza = null
 	# ¿Viene hoy el crítico de la guía? Llega mezclado entre los clientes (nunca primero ni último)
 	critic_at = -1
@@ -1784,6 +1788,11 @@ func _make_order(c: Dictionary) -> Dictionary:
 		var layers: Array = order["toppings"].duplicate()
 		layers.insert(rng.randi_range(0, layers.size()), "Carne")
 		order["layers"] = layers
+	if r.get("spiced", false):
+		# Masala: las especias en un orden exacto (más especias en los días difíciles)
+		var sp: Array = Data.SPICES.keys()
+		sp.shuffle()
+		order["spices"] = sp.slice(0, 3 if int(level["max_toppings"]) < 3 else 4)
 	return order
 
 
@@ -2348,6 +2357,7 @@ func _deliver() -> void:
 	var leftovers: Array = o["plate"].duplicate()
 	var hits := 0
 	var qualities := []
+	var spice_q := 0.0         # curry: qué tan bien siguió el orden de las especias
 	for entry in o["items"]:
 		for k in leftovers.size():
 			var e: Dictionary = leftovers[k]
@@ -2359,6 +2369,8 @@ func _deliver() -> void:
 					q = _pizza_quality(e, _target_for(o, e["item"]))
 					if e.has("pizza") and e["pizza"].get("stretch", 0.0) < 1.0:
 						q *= 0.5      # la masa no estaba bien estirada
+				elif e.has("spices"):
+					spice_q = _seq_score(o.get("spices", []), e["spices"])    # masala: las especias en el orden pedido (se puntúa aparte)
 				elif e.has("pipe_q"):
 					q = e["pipe_q"]       # éclair: qué tan bien se siguió la guía con la manga
 				elif e.has("patty_t"):
@@ -2435,6 +2447,9 @@ func _deliver() -> void:
 	if o.has("layers"):
 		# Hamburguesa por capas: el armado en orden pesa como la cocción (no lleva salsa aparte)
 		total = s_items * 0.25 + s_cook * 0.25 + s_tops * 0.3 + s_wait * 0.2
+	if o.has("spices"):
+		# Curry: el orden de las especias pesa casi como la cocción
+		total = s_items * 0.25 + s_cook * 0.25 + spice_q * 0.2 + s_sauce * 0.05 + s_tops * 0.05 + s_wait * 0.2
 	var s_drink := -1.0
 	if o.get("drink", "") != "":
 		# Con bebida: pesa un 10% y el resto se reparte en proporción
@@ -2475,6 +2490,8 @@ func _deliver() -> void:
 		last_result["lines"].append("Copa: %s" % Data.wine_desc(o.get("wine_fill", 0.0), o.get("wine_spill", 0.0)))
 	if order_ok >= 0.0:
 		last_result["lines"].append("Capas en orden %d" % int(order_ok))
+	if o.has("spices"):
+		last_result["lines"].append("Especias %d" % int(spice_q))
 	if o.get("critic", false):
 		critic_score = total
 		last_result["verdict"] = "Mmm... (anota en la libreta)"
@@ -2712,6 +2729,8 @@ func _ticket_text(o) -> String:
 	if not Data.RECIPES[o["recipe"]]["sauces"].is_empty():
 		lines.append("Salsa: " + (o["sauce"] if o["sauce"] != "" else "sin salsa"))
 	var tops: Array = o["toppings"]
+	if o.has("spices"):
+		lines.append("%d especias en orden (Especiero)" % o["spices"].size())
 	if o.has("layers"):
 		lines.append("Capas: " + " / ".join(PackedStringArray(o["layers"])))
 	elif not tops.is_empty():
@@ -3126,7 +3145,10 @@ func _recipe_step(n: int, o, entry: Dictionary, compact: bool) -> Control:
 		"ready":
 			how = "Despensa (en Emplatado)"
 		"assembled":
-			how = "Plancha: medallón %s · Armado: capas en orden" % (entry["doneness"].to_lower() if entry["doneness"] != "" else "")
+			match id:
+				"masala": how = "Especiero: " + " > ".join(PackedStringArray(o.get("spices", [])))
+				"eclair": how = "Crêperie: manga de %s" % o["sauce"].to_lower()
+				_: how = "Plancha: medallón %s · Armado: capas en orden" % (entry["doneness"].to_lower() if entry["doneness"] != "" else "")
 	col.add_child(_label(how, 11 + fs, Color("2f5d50")))
 	var status := _item_progress(o, id)
 	if status == "":
@@ -3177,6 +3199,7 @@ func _prep_name() -> String:
 		"tortilleria": return "Tortillería"
 		"armado": return "Armado"
 		"creperie": return "Crêperie"
+		"especiero": return "Especiero"
 	return "Tabla"
 
 
@@ -3186,6 +3209,7 @@ func _build_prep_station() -> void:
 		"tortilleria": _build_tortilleria_station()
 		"armado": _build_armado_station()
 		"creperie": _build_creperie_station()
+		"especiero": _build_especiero_station()
 		_: _build_board_station()
 
 
@@ -3276,6 +3300,106 @@ func _build_mesa_station() -> void:
 	oven.custom_minimum_size = Vector2(280, 54)
 	oven.disabled = mesa_pizza == null or mesa_pizza["stretch"] < 1.0
 	station_box.add_child(oven)
+
+
+# --- 3 (India). Especiero: el masala con las especias en el orden del ticket ---
+
+## Qué tan bien coincide una secuencia con la pedida: cada elemento en su lugar suma; de más o de menos resta
+func _seq_score(want: Array, got: Array) -> float:
+	if want.is_empty():
+		return 100.0
+	var same := 0
+	for k in mini(want.size(), got.size()):
+		if want[k] == got[k]:
+			same += 1
+	return 100.0 * same / maxi(want.size(), got.size())
+
+
+func _build_especiero_station() -> void:
+	var draw_bg := func(ci, _t): Art.draw_wood_counter(ci, Rect2(Vector2.ZERO, STATION_SIZE))
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
+	var o = _get_order(selected_id)
+	_tag("Especiero  ·  tocá las especias de la masala dabba en el orden del ticket y servilo cuando esté completo", Vector2(12, 4), 15)
+	# Izquierda: la masala dabba (la caja redonda con las latitas)
+	var names: Array = Data.SPICES.keys()
+	var dabba := func(ci, _t):
+		ci.draw_circle(Vector2(170, 210), 166, Color(0, 0, 0, 0.25))
+		ci.draw_circle(Vector2(166, 204), 164, Color("c9ccd0"))
+		ci.draw_circle(Vector2(166, 204), 152, Color("e2e5e8"))
+	_painter(Rect2(10, 40, 340, 420), dabba, false)
+	for k in names.size():
+		var nm: String = names[k]
+		var col: Color = Data.SPICES[nm]
+		var p: Vector2 = Vector2(176, 244) + (Vector2.ZERO if k == names.size() - 1 else Vector2.from_angle(-PI / 2.0 + k * TAU / (names.size() - 1)) * 102.0)
+		var b := _prop(Rect2(p - Vector2(50, 50), Vector2(100, 100)))
+		b.draw_fn = func(ci, r): Art.draw_spice_tin(ci, r, col)
+		b.text = nm
+		b.text_size = 12
+		b.pressed.connect(_masala_add.bind(nm))
+	# Centro: el karahi con lo que se va agregando
+	var added: Array = masala_pan["spices"] if masala_pan != null else []
+	var karahi := func(ci, t):
+		Art.draw_karahi(ci, Vector2(190, 170), 150.0, added, t)
+		if added.is_empty():
+			Art.text(ci, Vector2(0, 340), "Tocá la primera especia", 18, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 380, 4)
+	_painter(Rect2(360, 40, 380, 360), karahi, true)
+	var undo := _button("Empezar de nuevo", _masala_discard, 15)
+	undo.position = Vector2(390, 410)
+	undo.disabled = masala_pan == null
+	station_box.add_child(undo)
+	var done := _button("¡Masala listo!", _masala_finish, 19)
+	done.position = Vector2(570, 406)
+	done.custom_minimum_size = Vector2(170, 0)
+	done.disabled = added.is_empty()
+	station_box.add_child(done)
+	# Derecha: el orden que pidió el cliente
+	var want: Array = o.get("spices", []) if o != null else []
+	var title := "Elegí un ticket con curry" if want.is_empty() else "#%d %s: %s" % [o["id"], o["name"], Data.RECIPES[o["recipe"]]["name"]]
+	var draw_want := func(ci, _t):
+		Art.draw_paper(ci, Rect2(0, 0, 500, 420))
+		Art.text(ci, Vector2(20, 40), title, 17, COL_INK)
+		if want.is_empty():
+			return
+		Art.text(ci, Vector2(20, 66), "Especias, en este orden:", 14, Color(0.35, 0.28, 0.2))
+		for k in want.size():
+			var nm: String = want[k]
+			var y := 110.0 + k * 52.0
+			Art.draw_spice_tin(ci, Rect2(24, y - 22, 44, 44), Data.SPICES[nm])
+			Art.text(ci, Vector2(80, y + 7), "%d. %s" % [k + 1, nm], 19, COL_INK)
+			if k < added.size():
+				var good: bool = added[k] == nm
+				Art.text(ci, Vector2(330, y + 7), "bien" if good else "¡no era esa!", 16, Color("2f7a3a") if good else Color("c0281a"))
+	_painter(Rect2(760, 36, 500, 420), draw_want, false)
+
+
+func _masala_add(nm: String) -> void:
+	if masala_pan == null:
+		masala_pan = {"spices": []}
+	if masala_pan["spices"].size() >= 6:
+		_hint("¡Ya tiene demasiadas especias!")
+		return
+	masala_pan["spices"].append(nm)
+	_play_sfx("salero", -4.0)
+	_refresh_station()
+
+
+func _masala_finish() -> void:
+	if masala_pan == null or masala_pan["spices"].is_empty():
+		return
+	prepared.append({"item": "masala", "t": -1.0, "spices": masala_pan["spices"].duplicate(), "pantry": false, "chopped": false,
+		"label": "Masala (%d especias)" % masala_pan["spices"].size()})
+	masala_pan = null
+	_play_sfx("plato", -6.0)
+	_hint("¡Masala listo! Está en la bandeja del Emplatado")
+	_refresh_all()
+
+
+func _masala_discard() -> void:
+	if masala_pan == null:
+		return
+	masala_pan = null
+	money -= Data.WASTE_COST["chop"]
+	_refresh_station()
 
 
 # --- 3 (Francia). Crêperie: esparcir crêpes y decorar éclairs con la manga ---
@@ -4243,6 +4367,9 @@ func _order_text(o) -> String:
 		lines.append("· " + _req_text(entry))
 	if not Data.RECIPES[o["recipe"]]["sauces"].is_empty():
 		lines.append("· " + (o["sauce"] if o["sauce"] != "" else "sin salsa"))
+	if o.has("spices"):
+		lines.append("Especias (en orden):")
+		lines.append("  " + " > ".join(PackedStringArray(o["spices"])))
 	if o.has("layers"):
 		lines.append("Capas (de abajo arriba):")
 		lines.append("  " + " / ".join(PackedStringArray(o["layers"])))
