@@ -7,7 +7,7 @@ const ZONE := 1.0          # margen alrededor del punto ideal de cocción (en un
 const COOK_PENALTY := 14.0  # puntos que se pierden por cada unidad fuera del margen
 
 # Lo que se pierde de la caja al tirar comida a la basura
-const WASTE_COST := {"cook": 3, "chop": 1, "ready": 2, "condiment": 1}
+const WASTE_COST := {"cook": 3, "chop": 1, "ready": 2, "condiment": 1, "assembled": 4}
 
 const LEAVE_FACTOR := 2.3      # si esperan más que paciencia x esto, se van y abandonan el pedido
 const COOK_SLOW := 1.35       # ritmo de cocción: todo se cocina un 35% más lento que los tiempos de las recetas
@@ -29,8 +29,8 @@ const TOOLS := {
 const FRIDGE_GROUPS := [
 	["Carnes", ["milanesa", "bife", "pollo", "hamburguesa", "carne_asada", "pastor"]],
 	["Pastas, arroz y granos", ["spaghetti", "noquis", "ravioles", "fettuccine", "arroz", "frijoles"]],
-	["Verduras", ["papas_fritas", "calabaza", "berenjena", "morron"]],
-	["Dulces", ["panqueque", "churros"]],
+	["Verduras", ["papas_fritas", "calabaza", "berenjena", "morron", "aros_cebolla"]],
+	["Dulces", ["panqueque", "churros", "malteada_choco", "malteada_frutilla", "malteada_vainilla"]],
 ]
 const TOOL_ORDER := ["plato", "olla", "espatula", "canasto", "bandeja", "pala", "tabla"]
 const TOOL_FOR := {"olla": "olla", "plancha": "espatula", "freidora": "canasto", "horno": "bandeja", "horno_lena": "pala"}   # el comal se maneja con la mano: no ensucia utensilios
@@ -114,8 +114,9 @@ const APPLIANCES := {
 	"horno": {"name": "Horno", "slots": 3},
 	"horno_lena": {"name": "Horno de leña", "slots": 3},   # Italia: la pizza se gira con la pala
 	"comal": {"name": "Comal", "slots": 4},             # México: las tortillas se dan vuelta a mano
+	"licuadora": {"name": "Licuadora", "slots": 2},        # EE.UU.: malteadas (si se pasa, queda aguada)
 }
-const APPLIANCE_ORDER := ["comal", "olla", "plancha", "freidora", "horno", "horno_lena"]
+const APPLIANCE_ORDER := ["comal", "olla", "plancha", "freidora", "horno", "horno_lena", "licuadora"]
 
 # kind: "cook" se cocina en un aparato (target = segundos ideales, burn = se quema)
 #       "chop" se corta en la tabla (cuts = cantidad de cortes)
@@ -162,6 +163,13 @@ const ITEMS := {
 	"frijoles": {"name": "Frijoles", "kind": "cook", "where": "olla", "salt": true, "target": 10.0, "burn": 18.0},
 	"churros": {"name": "Churros", "kind": "cook", "where": "freidora", "target": 6.0, "burn": 11.0},
 	"queso": {"name": "Queso Oaxaca", "kind": "ready"},
+	# Estados Unidos. "assembled": se arma por capas en el Armado con un medallón ("patty") de la plancha
+	"burger": {"name": "Burger", "kind": "assembled", "patty": "hamburguesa", "target": 7.0, "burn": 14.0,
+		"doneness": {"A punto": 7.0, "Bien cocida": 10.0}},
+	"aros_cebolla": {"name": "Aros de cebolla", "kind": "cook", "where": "freidora", "target": 5.0, "burn": 10.0},
+	"malteada_choco": {"name": "Malteada de chocolate", "kind": "cook", "where": "licuadora", "target": 5.0, "burn": 10.0},
+	"malteada_frutilla": {"name": "Malteada de frutilla", "kind": "cook", "where": "licuadora", "target": 5.0, "burn": 10.0},
+	"malteada_vainilla": {"name": "Malteada de vainilla", "kind": "cook", "where": "licuadora", "target": 5.0, "burn": 10.0},
 }
 
 # parts: cada parte es una lista de opciones; el cliente elige una por parte.
@@ -210,6 +218,17 @@ const RECIPES := {
 		"sauces": ["Salsa roja", "Salsa verde", "Sin salsa"], "toppings": ["Queso fresco", "Crema"]},
 	"churros": {"name": "Churros", "cat": "Postres", "parts": [["churros"]], "sauces": [],
 		"toppings": ["Azúcar y canela", "Chocolate"], "min_toppings": 1},
+	# Estados Unidos. "layered": el cliente pide las capas en un orden exacto (de abajo hacia arriba)
+	"cheeseburger": {"name": "Cheeseburger", "cat": "Burgers", "parts": [["burger"]], "uses": ["hamburguesa"],
+		"prebuilt": true, "layered": true, "sauces": [], "min_toppings": 2,
+		"toppings": ["Cheddar", "Lechuga", "Tomate", "Cebolla", "Panceta", "Pepinos", "Ketchup", "Mostaza"]},
+	"combo": {"name": "Combo con papas", "cat": "Burgers", "parts": [["burger"], ["papas_fritas", "aros_cebolla"]], "uses": ["hamburguesa"],
+		"prebuilt": true, "layered": true, "sauces": [], "min_toppings": 2,
+		"toppings": ["Cheddar", "Lechuga", "Tomate", "Cebolla", "Panceta", "Pepinos", "Ketchup", "Mostaza"]},
+	"pancakes": {"name": "Pancakes", "cat": "Desayunos", "parts": [["panqueque"]],
+		"sauces": ["Miel de maple", "Sin salsa"], "toppings": ["Manteca", "Frutillas", "Arándanos"], "min_toppings": 1},
+	"malteada": {"name": "Malteada", "cat": "Malteadas", "parts": [["malteada_choco", "malteada_frutilla", "malteada_vainilla"]],
+		"sauces": [], "toppings": ["Crema", "Cereza"], "min_toppings": 1},
 }
 
 # Cada día suma recetas nuevas al menú y sube la dificultad.
@@ -254,6 +273,19 @@ const MEXICO_LEVELS := [
 		"interval": [25.0, 31.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
 ]
 
+
+# Días del Big Apple Diner (Nueva York)
+const US_LEVELS := [
+	{"name": "Day 1 · Hamburguesería", "new": ["cheeseburger"], "customers": 5,
+		"interval": [28.0, 34.0], "patience": 110.0, "max_toppings": 2, "show_zone": true,
+		"tip": "Las hamburguesas se arman en el Armado (tecla 3), capa por capa y en el orden EXACTO del ticket, de abajo hacia arriba. Primero cociná el medallón en la plancha: queda en la bandeja y desde el Armado lo agregás como la capa Carne."},
+	{"name": "Day 2 · Desayuno y malteadas", "new": ["pancakes", "malteada"], "customers": 6,
+		"interval": [26.0, 32.0], "patience": 110.0, "max_toppings": 2, "show_zone": true,
+		"tip": "Malteadas: arrastrá el helado a la licuadora y sacala a tiempo (si se pasa, queda aguada). Pancakes en la plancha, ¡sin sal!"},
+	{"name": "Day 3 · Combo neoyorquino", "new": ["combo"], "customers": 8, "drinks": true,
+		"interval": [25.0, 31.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
+]
+
 # Molcajete (México): ingredientes de cada salsa y cuántas vueltas de mano hacen falta para molerla
 const MOLCAJETE := {
 	"Salsa verde": ["tomatillo", "chile", "cilantro"],
@@ -282,8 +314,10 @@ const COUNTRIES := {
 		"drinks": ["Agua", "Cola", "Agua de jamaica", "Horchata", "Limonada"]},
 	"eeuu": {"name": "Estados Unidos", "city": "Nueva York", "restaurant": "Big Apple Diner", "lon": -74.0, "lat": 40.7,
 		"flag": ["barras", [Color("b22234"), Color("ffffff"), Color("3c3b6e")]],
-		"cuisine": "Hamburguesas, hot dogs y malteadas", "cooking": "Armado por capas a contrarreloj",
-		"price": 7000, "stars_needed": 3, "ready": false, "levels": []},
+		"cuisine": "Hamburguesas, pancakes y malteadas", "cooking": "Armado por capas en el orden exacto y licuadora",
+		"price": 7000, "stars_needed": 3, "ready": true, "levels": US_LEVELS, "prep": "armado",
+		"names": ["Mike", "Jenny", "Bob", "Ashley", "Tony", "Linda", "Kevin", "Brittany", "Joe", "Megan", "Big Al", "Stacy"],
+		"drinks": ["Agua", "Cola", "Lima-limón", "Naranja", "Limonada"]},
 	"italia": {"name": "Italia", "city": "Roma", "restaurant": "Trattoria del Forno", "lon": 12.5, "lat": 41.9,
 		"flag": ["v", [Color("009246"), Color("ffffff"), Color("ce2b37")]],
 		"cuisine": "Pizza al horno de leña, pasta fresca y tiramisú", "cooking": "Mesa de pizza y horno de leña con pala",

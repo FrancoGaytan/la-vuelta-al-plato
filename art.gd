@@ -17,6 +17,7 @@ const SAUCE_COLORS := {
 	"Salsa de soja": Color("3b2414"),
 	"Tomate": Color("c8341f"), "Blanca": Color("f3ecd8"), "Pomodoro": Color("d23a22"), "Alfredo": Color("f5ecd0"),
 	"Salsa verde": Color("6a9a2a"), "Salsa roja": Color("b8281a"), "Guacamole": Color("8ab83a"),
+	"Miel de maple": Color("b8661a"),
 }
 
 # shape: cómo se dibuja cada topping sobre el plato
@@ -53,6 +54,11 @@ const TOPPINGS := {
 	"Queso fresco": {"color": Color("fbf8ee"), "shape": "dot"},
 	"Azúcar y canela": {"color": Color("c8955a"), "shape": "sugar"},
 	"Chocolate": {"color": Color("4a2412"), "shape": "drizzle"},
+	# EE.UU.
+	"Manteca": {"color": Color("f8e48a"), "shape": "square"},
+	"Frutillas": {"color": Color("d9283a"), "shape": "disc"},
+	"Arándanos": {"color": Color("3a3a8a"), "shape": "olive"},
+	"Cereza": {"color": Color("c8102e"), "shape": "disc"},
 }
 
 const SKINS := [Color("f9d7b9"), Color("f1c19a"), Color("d9a074"), Color("b97a4f"), Color("8d5a3b"), Color("6b4228")]
@@ -189,6 +195,9 @@ static func draw_cooking(ci: CanvasItem, id: String, rect: Rect2, t: float, targ
 
 ## Dibuja una preparación (cocida, cortada o de la despensa).
 static func draw_entry(ci: CanvasItem, e: Dictionary, rect: Rect2) -> void:
+	if e.has("layers"):
+		draw_burger(ci, rect, e["layers"], true, e.get("patty_t", -1.0), e.get("vtarget", 7.0), e.get("burn", 14.0))
+		return
 	if e.get("item", "") == "pizza":
 		draw_pizza(ci, rect, e.get("pizza", {}), e.get("ta", 0.0), e.get("tb", 0.0), e.get("vtarget", 9.0), e.get("burn", 15.0), e.get("rot", 0.0))
 		return
@@ -800,6 +809,26 @@ static func draw_topping_icon(ci: CanvasItem, c: Vector2, s: float, name: String
 				ci.draw_line(P.call(-12 + k * 8, -10), P.call(-12 + k * 8, 8), Color("2e1408"), 1.2)
 			ci.draw_line(P.call(-12, -1), P.call(12, -1), Color("2e1408"), 1.2)
 			ellipse(ci, P.call(-6, -7), Vector2(4, 1.5) * u, Color(1, 1, 1, 0.2))
+		"Manteca":
+			rrect(ci, Rect2(P.call(-12, -8), Vector2(24, 16) * u), Color("f8e48a"), 3 * u, Color("d8b84a"), 1)
+			rrect(ci, Rect2(P.call(-10, -8), Vector2(20, 5) * u), Color("fff2b0"), 2 * u)
+		"Frutillas":
+			for k in 2:
+				var fc: Vector2 = P.call(-7 + k * 14, (k % 2) * 4)
+				ci.draw_colored_polygon(PackedVector2Array([fc + Vector2(-8, -6) * u, fc + Vector2(8, -6) * u, fc + Vector2(0, 12) * u]), Color("d9283a"))
+				ci.draw_circle(fc + Vector2(0, -6) * u, 8 * u, Color("d9283a"))
+				for d in 4:
+					ci.draw_circle(fc + Vector2(-4 + (d % 2) * 8, -2 + (d / 2) * 6) * u, 0.9 * u, Color("f6e08a"))
+				_leaf_icon(ci, fc + Vector2(0, -13) * u, 6 * u, -1.57, Color("3f8f2f"))
+		"Arándanos":
+			for k in 5:
+				var bc: Vector2 = P.call(-10 + (k % 3) * 10, -4 + (k / 3) * 10)
+				ci.draw_circle(bc, 6 * u, Color("3a3a8a"))
+				ci.draw_circle(bc + Vector2(-2, -2) * u, 1.6 * u, Color(1, 1, 1, 0.35))
+		"Cereza":
+			ci.draw_circle(P.call(0, 4), 10 * u, Color("c8102e"))
+			ci.draw_circle(P.call(-3, 1), 3 * u, Color(1, 1, 1, 0.35))
+			ci.draw_line(P.call(0, -5), P.call(6, -16), Color("3f7a28"), 2.0 * u)
 		_:
 			text(ci, c + Vector2(-s, 4), name.left(1), int(s * 0.6), INK, HORIZONTAL_ALIGNMENT_CENTER, s * 2)
 
@@ -1907,6 +1936,9 @@ static func draw_dining(ci: CanvasItem, rect: Rect2, menu: Array, time: float, d
 	if theme == "mexico":
 		draw_dining_mexico(ci, rect, menu, time, decor)
 		return
+	if theme == "eeuu":
+		draw_dining_eeuu(ci, rect, menu, time, decor)
+		return
 	var o := rect.position
 	grad_rect(ci, rect, Color("f1dfbd"), Color("e2c79c"))
 	for i in int(rect.size.x / 48.0) + 1:
@@ -1982,6 +2014,9 @@ static func draw_counter(ci: CanvasItem, rect: Rect2, top: float, theme := "arge
 		return
 	if theme == "mexico":
 		draw_counter_mexico(ci, rect, top)
+		return
+	if theme == "eeuu":
+		draw_counter_eeuu(ci, rect, top)
 		return
 	var y := rect.position.y + top
 	ci.draw_rect(Rect2(rect.position.x, y + 18, rect.size.x, rect.end.y - y - 18), Color("6e4527"))
@@ -2519,4 +2554,206 @@ static func draw_counter_mexico(ci: CanvasItem, rect: Rect2, top: float) -> void
 			ci.draw_circle(c, 10, Color("d0461e"))
 	grad_rect(ci, Rect2(rect.position.x, y, rect.size.x, 20), Color("8a5a2b"), Color("6e4527"))
 	ci.draw_rect(Rect2(rect.position.x, y + 3, rect.size.x, 2), Color(1, 1, 1, 0.25))
+	ci.draw_rect(Rect2(rect.position.x, y + 20, rect.size.x, 6), Color(0, 0, 0, 0.3))
+
+
+# --- Hamburguesa por capas (EE.UU.) ---
+
+## Alto relativo de cada capa (respecto del ancho del pan)
+static func burger_layer_h(name: String) -> float:
+	match name:
+		"PanAbajo": return 0.17
+		"PanArriba": return 0.32
+		"Carne": return 0.16
+		"Cheddar": return 0.05
+		"Lechuga": return 0.08
+		"Tomate": return 0.07
+		"Cebolla": return 0.05
+		"Panceta": return 0.06
+		"Pepinos": return 0.05
+		"Ketchup", "Mostaza": return 0.035
+	return 0.05
+
+
+## Dibuja una capa apoyada en y (borde de abajo), centrada en cx, de ancho w. Devuelve cuánto ocupa.
+static func draw_burger_layer(ci: CanvasItem, cx: float, y: float, w: float, name: String, patty_col := Color("6a3218")) -> float:
+	var h := burger_layer_h(name) * w
+	var x0 := cx - w / 2.0
+	match name:
+		"PanAbajo":
+			rrect(ci, Rect2(x0 + w * 0.03, y - h, w * 0.94, h), Color("d9944a"), h * 0.45)
+			ci.draw_rect(Rect2(x0 + w * 0.04, y - h, w * 0.92, h * 0.3), Color("f2d6a4"))
+		"PanArriba":
+			var pts := PackedVector2Array()
+			for k in 21:
+				var a := PI + PI * k / 20.0
+				pts.append(Vector2(cx + cos(a) * w * 0.5, y + sin(a) * h))
+			ci.draw_colored_polygon(pts, Color("e8a556"))
+			ci.draw_arc(Vector2(cx, y), w * 0.42, PI * 1.15, PI * 1.45, 10, Color(1, 1, 1, 0.25), w * 0.03)
+			for k in 7:
+				var sp := Vector2(cx + (k - 3) * w * 0.11, y - h * (0.45 + 0.3 * absf(sin(k * 1.7))))
+				ellipse(ci, sp, Vector2(w * 0.022, w * 0.012), Color("fbf0d4"))
+		"Carne":
+			rrect(ci, Rect2(x0, y - h, w, h), patty_col, h * 0.45)
+			for k in 6:
+				ci.draw_circle(Vector2(x0 + w * (0.1 + k * 0.16), y - h * 0.5), w * 0.02, patty_col.darkened(0.3))
+			ci.draw_line(Vector2(x0 + w * 0.08, y - h * 0.8), Vector2(x0 + w * 0.92, y - h * 0.8), Color(1, 1, 1, 0.12), w * 0.02)
+		"Cheddar":
+			var pts := PackedVector2Array([Vector2(x0 - w * 0.02, y - h), Vector2(x0 + w * 1.02, y - h), Vector2(x0 + w * 0.98, y),
+				Vector2(x0 + w * 0.82, y + h * 1.2), Vector2(x0 + w * 0.7, y), Vector2(x0 + w * 0.3, y), Vector2(x0 + w * 0.18, y + h * 1.4), Vector2(x0 + w * 0.06, y)])
+			ci.draw_colored_polygon(pts, Color("f2b31d"))
+		"Lechuga":
+			var pts := PackedVector2Array()
+			for k in 17:
+				pts.append(Vector2(x0 - w * 0.04 + w * 1.08 * k / 16.0, y - h * (0.5 + 0.5 * absf(sin(k * 1.3)))))
+			pts.append(Vector2(x0 + w * 1.04, y))
+			pts.append(Vector2(x0 - w * 0.04, y))
+			ci.draw_colored_polygon(pts, Color("5fae3a"))
+			ci.draw_line(Vector2(x0, y - h * 0.4), Vector2(x0 + w, y - h * 0.4), Color("8fd06a"), w * 0.01)
+		"Tomate":
+			for k in 3:
+				rrect(ci, Rect2(x0 + w * (0.02 + k * 0.33), y - h, w * 0.31, h), Color("d9372a"), h * 0.4)
+				ci.draw_circle(Vector2(x0 + w * (0.17 + k * 0.33), y - h * 0.5), h * 0.25, Color("f08a6a"))
+		"Cebolla":
+			for k in 4:
+				ellipse(ci, Vector2(x0 + w * (0.14 + k * 0.24), y - h * 0.5), Vector2(w * 0.11, h * 0.5), Color("e8dcf0"))
+				ellipse(ci, Vector2(x0 + w * (0.14 + k * 0.24), y - h * 0.5), Vector2(w * 0.07, h * 0.28), Color("b88ac8"))
+		"Panceta":
+			for k in 2:
+				var pts := PackedVector2Array()
+				for j in 11:
+					pts.append(Vector2(x0 + w * (0.02 + k * 0.5) + w * 0.46 * j / 10.0, y - h + sin(j * 1.2) * h * 0.3))
+				ci.draw_polyline(pts, Color("a8423a"), h * 0.8)
+				ci.draw_polyline(pts, Color("e8a090"), h * 0.25)
+		"Pepinos":
+			for k in 4:
+				ellipse(ci, Vector2(x0 + w * (0.14 + k * 0.24), y - h * 0.5), Vector2(w * 0.1, h * 0.5), Color("5a8a2a"))
+				ellipse(ci, Vector2(x0 + w * (0.14 + k * 0.24), y - h * 0.5), Vector2(w * 0.07, h * 0.3), Color("b6d27a"))
+		"Ketchup", "Mostaza":
+			var col := Color("c4161c") if name == "Ketchup" else Color("e8b923")
+			var pts := PackedVector2Array()
+			for k in 25:
+				pts.append(Vector2(x0 + w * 0.08 + w * 0.84 * k / 24.0, y - h * 0.5 + sin(k * 1.4) * h * 0.4))
+			ci.draw_polyline(pts, col, h * 0.9, true)
+	return h
+
+
+## La hamburguesa vista de costado: pan de abajo, las capas en orden y (si está cerrada) el pan de arriba
+static func draw_burger(ci: CanvasItem, rect: Rect2, layers: Array, closed := true, patty_t := -1.0, target := 7.0, burn := 14.0, on_bottom := false) -> void:
+	var total := burger_layer_h("PanAbajo") + (burger_layer_h("PanArriba") if closed else 0.0)
+	for l in layers:
+		total += burger_layer_h(l)
+	var w := minf(rect.size.x * 0.9, rect.size.y * 0.9 / maxf(total, 0.6))
+	var cx := rect.get_center().x
+	var y := rect.get_center().y + total * w / 2.0
+	if on_bottom:
+		y = rect.end.y
+	ellipse(ci, Vector2(cx, y + w * 0.02), Vector2(w * 0.52, w * 0.06), Color(0, 0, 0, 0.2))
+	var patty_col := Color("6a3218")
+	if patty_t >= 0.0:
+		patty_col = Color("a8533a").lerp(Color("5a2a14"), clampf(patty_t / target, 0.0, 1.0))
+		if patty_t > target:
+			patty_col = patty_col.lerp(Color("2a1810"), clampf((patty_t - target) / (burn - target), 0.0, 1.0))
+	y -= draw_burger_layer(ci, cx, y, w, "PanAbajo")
+	for l in layers:
+		y -= draw_burger_layer(ci, cx, y, w, l, patty_col)
+	if closed:
+		draw_burger_layer(ci, cx, y, w, "PanArriba")
+
+
+## Ícono de un ingrediente para apilar (los cajones del Armado)
+static func draw_layer_bin(ci: CanvasItem, rect: Rect2, name: String) -> void:
+	rrect(ci, rect.grow(-3), Color("e9eef1"), 8, Color("aab3ba"), 2)
+	var w := rect.size.x * 0.7
+	var h := burger_layer_h(name) * w
+	draw_burger_layer(ci, rect.get_center().x, rect.get_center().y + h / 2.0 - 6, w, name)
+
+
+## Salón del Big Apple Diner (EE.UU.): pared turquesa, damero blanco y negro, cromo, neón y Nueva York por la ventana
+static func draw_dining_eeuu(ci: CanvasItem, rect: Rect2, menu: Array, time: float, decor: Array) -> void:
+	var o := rect.position
+	grad_rect(ci, rect, Color("8fd3c8"), Color("6fbfb2"))
+	# Damero abajo y moldura de cromo
+	var z := Rect2(o.x, o.y + 232, rect.size.x, rect.size.y - 232)
+	var ts := 40.0
+	for row in int(z.size.y / ts) + 1:
+		for col in int(z.size.x / ts) + 1:
+			var r := Rect2(z.position + Vector2(col * ts, row * ts), Vector2(ts, ts)).intersection(z)
+			if r.size.x > 0 and r.size.y > 0:
+				ci.draw_rect(r, Color("1d1d1f") if (row + col) % 2 == 0 else Color("f6f4ee"))
+	grad_rect(ci, Rect2(o.x, o.y + 222, rect.size.x, 12), Color("f2f4f6"), Color("9aa3ab"))
+	ci.draw_rect(Rect2(o.x, o.y + 226, rect.size.x, 2), Color(1, 1, 1, 0.8))
+	# Puerta de vidrio con marco de cromo y el cartel OPEN
+	var d := Rect2(o.x + 30, o.y + 40, 150, 290)
+	rrect(ci, d, Color("c8ccd0"), 6, Color("8a9298"), 4)
+	ci.draw_rect(d.grow(-14), Color(0.75, 0.9, 0.95, 0.75))
+	ci.draw_line(d.position + Vector2(30, 40), d.position + Vector2(60, 10), Color(1, 1, 1, 0.6), 3)
+	rrect(ci, Rect2(d.position + Vector2(120, 150), Vector2(10, 60)), Color("8a9298"), 4)
+	rrect(ci, Rect2(d.position + Vector2(28, 64), Vector2(94, 30)), Color("c0281a"), 6, Color("f6e7c8"), 2)
+	text(ci, d.position + Vector2(28, 85), "OPEN", 16, Color("fff6e0"), HORIZONTAL_ALIGNMENT_CENTER, 94)
+	# Ventana con Nueva York: rascacielos, el Empire State y un taxi
+	var w := Rect2(o.x + 300, o.y + 60, 440, 150)
+	rrect(ci, w.grow(10), Color("dfe3e6"), 10, Color("9aa3ab"), 3)
+	grad_rect(ci, w, Color("f6b26b"), Color("fbe3b8"))
+	for k in 11:
+		var bx := w.position.x + k * 42.0
+		var bh := 50.0 + (k * 53) % 70
+		ci.draw_rect(Rect2(bx, w.end.y - bh, 36, bh), Color("6b5a7a") if k % 2 == 0 else Color("5a4a6a"))
+		for j in int(bh / 14):
+			for q in 3:
+				if (j + q + k) % 3 != 0:
+					ci.draw_rect(Rect2(bx + 5 + q * 10, w.end.y - bh + 6 + j * 14, 5, 6), Color(1, 0.9, 0.55, 0.8))
+	var ex := w.position.x + 230
+	ci.draw_rect(Rect2(ex - 20, w.position.y + 60, 40, w.size.y - 60), Color("4a3a5a"))
+	ci.draw_rect(Rect2(ex - 12, w.position.y + 34, 24, 28), Color("4a3a5a"))
+	ci.draw_rect(Rect2(ex - 6, w.position.y + 16, 12, 20), Color("4a3a5a"))
+	ci.draw_line(Vector2(ex, w.position.y + 16), Vector2(ex, w.position.y), Color("4a3a5a"), 3)
+	rrect(ci, Rect2(w.position.x + 60, w.end.y - 18, 46, 16), Color("f2c418"), 4)
+	ci.draw_circle(Vector2(w.position.x + 70, w.end.y - 2), 4, Color("1d1d1f"))
+	ci.draw_circle(Vector2(w.position.x + 96, w.end.y - 2), 4, Color("1d1d1f"))
+	ci.draw_line(Vector2(w.get_center().x, w.position.y), Vector2(w.get_center().x, w.end.y), Color("dfe3e6"), 5)
+	# Cartel de neón DINER que titila
+	var glow := 0.75 + 0.25 * sin(time * 3.0) * (1.0 if fmod(time, 7.0) > 0.25 else 0.0)
+	var nr := Rect2(o.x + 760, o.y + 40, 104, 46)
+	rrect(ci, nr.grow(6), Color(1, 0.2, 0.4, 0.15 * glow), 14)
+	rrect(ci, nr, Color("2a2a2e"), 8, Color(1, 0.3, 0.5, glow), 3)
+	text(ci, nr.position + Vector2(0, 33), "DINER", 24, Color(1, 0.55, 0.7, glow), HORIZONTAL_ALIGNMENT_CENTER, nr.size.x)
+	# Rocola
+	var jb := Rect2(o.x + 770, o.y + 110, 84, 120)
+	var arch := PackedVector2Array()
+	for k in 17:
+		var a := PI + PI * k / 16.0
+		arch.append(Vector2(jb.get_center().x, jb.position.y + 40) + Vector2(cos(a) * 42, sin(a) * 40))
+	arch.append(jb.end)
+	arch.append(Vector2(jb.position.x, jb.end.y))
+	ci.draw_colored_polygon(arch, Color("c0392b"))
+	rrect(ci, Rect2(jb.position + Vector2(12, 34), Vector2(60, 36)), Color(1, 0.85, 0.4, 0.6 + 0.3 * sin(time * 4.0)), 6)
+	for k in 4:
+		ci.draw_line(jb.position + Vector2(18 + k * 16, 80), jb.position + Vector2(18 + k * 16, 112), Color("f2c418"), 3)
+	# Pizarra con el menú
+	var b := Rect2(o.x + 880, o.y + 52, 300, 166)
+	ci.draw_rect(b.grow(9), Color("c8ccd0"))
+	ci.draw_rect(b, Color("2c3a33"))
+	text(ci, b.position + Vector2(0, 30), "TODAY'S MENU", 20, Color("f4f1e6"), HORIZONTAL_ALIGNMENT_CENTER, b.size.x)
+	for i in menu.size():
+		text(ci, b.position + Vector2(18, 62 + i * 24), "• " + str(menu[i]), 16, Color("e9f0dc"), HORIZONTAL_ALIGNMENT_LEFT, 270)
+	for x in [260, 640, 1220]:
+		lamp(ci, o.x + x, o.y + 14, 4, time)
+	if "plantas" in decor:
+		hanging_plant(ci, o + Vector2(240, 14), 0.8)
+	if "ventilador" in decor:
+		ceiling_fan(ci, o + Vector2(450, 14), time)
+
+
+## Frente del mostrador del diner: cromo acanalado y franja roja
+static func draw_counter_eeuu(ci: CanvasItem, rect: Rect2, top: float) -> void:
+	var y := rect.position.y + top
+	var front := Rect2(rect.position.x, y + 18, rect.size.x, rect.end.y - y - 18)
+	grad_rect(ci, front, Color("e6eaed"), Color("aab3ba"))
+	for x in range(0, int(front.size.x), 14):
+		ci.draw_line(Vector2(front.position.x + x, front.position.y), Vector2(front.position.x + x, front.end.y), Color(1, 1, 1, 0.35), 2)
+		ci.draw_line(Vector2(front.position.x + x + 6, front.position.y), Vector2(front.position.x + x + 6, front.end.y), Color(0, 0, 0, 0.08), 2)
+	ci.draw_rect(Rect2(front.position.x, front.position.y + 30, front.size.x, 18), Color("c0281a"))
+	grad_rect(ci, Rect2(rect.position.x, y, rect.size.x, 20), Color("e8463c"), Color("b02a20"))
+	ci.draw_rect(Rect2(rect.position.x, y + 3, rect.size.x, 2), Color(1, 1, 1, 0.3))
 	ci.draw_rect(Rect2(rect.position.x, y + 20, rect.size.x, 6), Color(0, 0, 0, 0.3))

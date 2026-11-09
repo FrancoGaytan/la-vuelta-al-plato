@@ -82,6 +82,8 @@ const COOK_SFX := {
 	"plancha": ["res://assets/sfx/chisporroteo.wav", -16.0],
 	"freidora": ["res://assets/sfx/freidora.wav", -16.0],
 	"horno": ["res://assets/sfx/horno.wav", -21.0],
+	"comal": ["res://assets/sfx/chisporroteo.wav", -24.0],     # la tortilla chisporrotea apenas
+	"licuadora": ["res://assets/sfx/licuadora.wav", -20.0],
 }
 
 # Sonidos sueltos: archivo y volumen (dB)
@@ -167,6 +169,7 @@ var press_view = null
 var molcajete = null                  # lo que se está moliendo {sauce, ground, items}
 var molcajete_view = null
 var salsa_stock := {}                 # porciones de cada salsa molida
+var burger_stack = null               # EE.UU.: la hamburguesa que se está armando {layers, patty}
 var critic_at := -1                  # qué cliente del día es el crítico de la guía (-1 = hoy no viene)
 var critic_score := -1.0             # nota que le dio al plato (-1 = todavía no comió)
 var critic_name := ""
@@ -1430,6 +1433,7 @@ func _start_level(i: int) -> void:
 	press_masa = null
 	molcajete = null
 	salsa_stock = {}
+	burger_stack = null
 	mesa_pizza = null
 	# ¿Viene hoy el crítico de la guía? Llega mezclado entre los clientes (nunca primero ni último)
 	critic_at = -1
@@ -1764,6 +1768,11 @@ func _make_order(c: Dictionary) -> Dictionary:
 		"drink": _pick(_drinks()) if level.get("drinks", false) else "",
 		"plate_drink": "",
 	}
+	if r.get("layered", false):
+		# Hamburguesa por capas: los ingredientes en un orden exacto, con la carne en algún lugar del medio
+		var layers: Array = order["toppings"].duplicate()
+		layers.insert(rng.randi_range(0, layers.size()), "Carne")
+		order["layers"] = layers
 	return order
 
 
@@ -1776,6 +1785,9 @@ func _target_for(o, item_id: String) -> float:
 	for entry in o["items"]:
 		if entry["item"] == item_id and entry["doneness"] != "":
 			return info["doneness"][entry["doneness"]]
+		# El medallón de una hamburguesa armada: el punto que pidió para la hamburguesa
+		if Data.ITEMS[entry["item"]].get("patty", "") == item_id and entry["doneness"] != "" and info.has("doneness"):
+			return info["doneness"].get(entry["doneness"], info["target"])
 	return info["target"]
 
 
@@ -2335,6 +2347,10 @@ func _deliver() -> void:
 					q = _pizza_quality(e, _target_for(o, e["item"]))
 					if e.has("pizza") and e["pizza"].get("stretch", 0.0) < 1.0:
 						q *= 0.5      # la masa no estaba bien estirada
+				elif e.has("patty_t"):
+					# Hamburguesa armada: se juzga el medallón (punto y sal)
+					q = _cook_quality(e["patty_t"], _target_for(o, e["item"]), e["burn"])
+					q *= Data.salt_factor(Data.ITEMS[e["item"]]["patty"], e.get("salt", 0.0))
 				elif e.get("t", -1.0) >= 0.0:
 					q = _cook_quality(e["t"], _target_for(o, e["item"]), e["burn"])
 					q *= Data.salt_factor(e["item"], e.get("salt", 0.0))   # bien salado (o sin sal si no lleva)
@@ -2362,6 +2378,10 @@ func _deliver() -> void:
 				plate_sauce = e["pizza"].get("sauce", "")
 				put = e["pizza"].get("plate_toppings", [])
 				break
+			if e.has("layers"):
+				# Hamburguesa: los ingredientes son las capas que se apilaron en el Armado
+				put = e["layers"].filter(func(l): return l != "Carne")
+				break
 	var s_sauce := 100.0 if plate_sauce == o["sauce"] else 0.0
 
 	var wanted: Array = o["toppings"]
@@ -2374,12 +2394,30 @@ func _deliver() -> void:
 	for t in put:
 		union[t] = true
 	var s_tops := 100.0 if union.is_empty() else 100.0 * top_hits / union.size()
+	var order_ok := -1.0
+	if o.has("layers"):
+		# Además, el orden de las capas: cuántas quedaron en su lugar
+		var built: Array = []
+		for e in o["plate"]:
+			if e.has("layers"):
+				built = e["layers"]
+				break
+		var want: Array = o["layers"]
+		var same := 0
+		for k in mini(want.size(), built.size()):
+			if want[k] == built[k]:
+				same += 1
+		order_ok = 100.0 * same / maxi(want.size(), built.size()) if not built.is_empty() else 0.0
+		s_tops = s_tops * 0.4 + order_ok * 0.6
 
 	var wait: float = elapsed - o["arrived"]
 	var patience: float = _patience()
 	var s_wait := clampf(100.0 - maxf(0.0, wait - patience) * 1.0, 0.0, 100.0)
 
 	var total := s_items * 0.3 + s_cook * 0.3 + s_sauce * 0.1 + s_tops * 0.1 + s_wait * 0.2
+	if o.has("layers"):
+		# Hamburguesa por capas: el armado en orden pesa como la cocción (no lleva salsa aparte)
+		total = s_items * 0.25 + s_cook * 0.25 + s_tops * 0.3 + s_wait * 0.2
 	var s_drink := -1.0
 	if o.get("drink", "") != "":
 		# Con bebida: pesa un 10% y el resto se reparte en proporción
@@ -2418,6 +2456,8 @@ func _deliver() -> void:
 		last_result["lines"].append("¡Plato sucio! -25%")
 	if o.get("drink", "") == "Vino tinto" and o.get("plate_drink", "") == "Vino tinto":
 		last_result["lines"].append("Copa: %s" % Data.wine_desc(o.get("wine_fill", 0.0), o.get("wine_spill", 0.0)))
+	if order_ok >= 0.0:
+		last_result["lines"].append("Capas en orden %d" % int(order_ok))
 	if o.get("critic", false):
 		critic_score = total
 		last_result["verdict"] = "Mmm... (anota en la libreta)"
@@ -2655,7 +2695,9 @@ func _ticket_text(o) -> String:
 	if not Data.RECIPES[o["recipe"]]["sauces"].is_empty():
 		lines.append("Salsa: " + (o["sauce"] if o["sauce"] != "" else "sin salsa"))
 	var tops: Array = o["toppings"]
-	if not tops.is_empty():
+	if o.has("layers"):
+		lines.append("Capas: " + " / ".join(PackedStringArray(o["layers"])))
+	elif not tops.is_empty():
 		lines.append("+ " + ", ".join(PackedStringArray(tops)))
 	if o.get("drink", "") != "":
 		lines.append("Bebida: " + o["drink"])
@@ -3038,6 +3080,8 @@ func _recipe_step(n: int, o, entry: Dictionary, compact: bool) -> Control:
 			var where: String = Data.APPLIANCES[info["where"]]["name"]
 			if id == "pizza":
 				where = "Mesa: estirar y armar · Horno de leña: girala"
+			if info.get("flip", false):
+				where = "Prensa y comal: dala vuelta"
 			if info.has("temps"):
 				var temp: int = info.get("target_temp", 0)
 				if entry["doneness"] != "":
@@ -3056,6 +3100,8 @@ func _recipe_step(n: int, o, entry: Dictionary, compact: bool) -> Control:
 			how = "Tabla · %d cortes" % cuts
 		"ready":
 			how = "Despensa (en Emplatado)"
+		"assembled":
+			how = "Plancha: medallón %s · Armado: capas en orden" % (entry["doneness"].to_lower() if entry["doneness"] != "" else "")
 	col.add_child(_label(how, 11 + fs, Color("2f5d50")))
 	var status := _item_progress(o, id)
 	if status == "":
@@ -3104,6 +3150,7 @@ func _prep_name() -> String:
 	match _prep():
 		"mesa": return "Mesa"
 		"tortilleria": return "Tortillería"
+		"armado": return "Armado"
 	return "Tabla"
 
 
@@ -3111,6 +3158,7 @@ func _build_prep_station() -> void:
 	match _prep():
 		"mesa": _build_mesa_station()
 		"tortilleria": _build_tortilleria_station()
+		"armado": _build_armado_station()
 		_: _build_board_station()
 
 
@@ -3201,6 +3249,126 @@ func _build_mesa_station() -> void:
 	oven.custom_minimum_size = Vector2(280, 54)
 	oven.disabled = mesa_pizza == null or mesa_pizza["stretch"] < 1.0
 	station_box.add_child(oven)
+
+
+# --- 3 (EE.UU.). Armado: la hamburguesa capa por capa, en el orden del ticket ---
+
+func _patties() -> Array:
+	return prepared.filter(func(e): return Data.ITEMS[e["item"]].get("where", "") == "plancha" and \
+		not Data.RECIPES.values().filter(func(r): return e["item"] in r.get("uses", [])).is_empty())
+
+
+func _build_armado_station() -> void:
+	var draw_bg := func(ci, _t): Art.draw_wood_counter(ci, Rect2(Vector2.ZERO, STATION_SIZE))
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
+	var o = _get_order(selected_id)
+	_tag("Armado  ·  tocá los ingredientes en el orden del ticket, de abajo hacia arriba, y cerrá con el pan", Vector2(12, 4), 15)
+	# Izquierda: los cajones de ingredientes (la carne sale de la bandeja: hay que cocinarla antes)
+	var names: Array = ["Carne"] + _cat_options("Burgers", "toppings")
+	var n_patty := _patties().size()
+	for k in names.size():
+		var nm: String = names[k]
+		var b := _prop(Rect2(12 + (k % 3) * 104, 40 + (k / 3) * 104, 100, 100))
+		b.draw_fn = func(ci, r): Art.draw_layer_bin(ci, r, nm)
+		b.text = nm if nm != "Carne" else "Carne (%d)" % n_patty
+		b.text_size = 13
+		if nm == "Carne" and n_patty == 0:
+			b.modulate.a = 0.5
+			b.tooltip_text = "No hay medallones en la bandeja: cociná uno en la plancha"
+		b.pressed.connect(_armado_add.bind(nm))
+	# Centro: la hamburguesa que se está armando
+	var layers: Array = burger_stack["layers"] if burger_stack != null else []
+	var draw_stack := func(ci, _t):
+		Art.rrect(ci, Rect2(20, 300, 340, 40), Color("dfe5ea"), 18, Color("aab3ba"), 2)
+		if burger_stack == null:
+			Art.text(ci, Vector2(0, 200), "Tocá un ingrediente para empezar", 18, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 380, 4)
+			return
+		Art.draw_burger(ci, Rect2(60, 10, 260, 302), layers, false, -1.0, 7.0, 14.0, true)
+	_painter(Rect2(330, 40, 380, 340), draw_stack, true)
+	var undo := _button("Sacar la última capa", _armado_undo, 15)
+	undo.position = Vector2(350, 396)
+	undo.disabled = layers.is_empty()
+	station_box.add_child(undo)
+	var close := _button("¡Tapa y lista!", _armado_close, 19)
+	close.position = Vector2(540, 392)
+	close.custom_minimum_size = Vector2(170, 0)
+	close.disabled = burger_stack == null or burger_stack.get("patty") == null
+	station_box.add_child(close)
+	# Derecha: lo que pidió el cliente, capa por capa (con tilde si coincide)
+	var want: Array = o.get("layers", []) if o != null else []
+	var title := "Elegí un ticket con hamburguesa" if want.is_empty() else "#%d %s: %s" % [o["id"], o["name"], _req_text(o["items"][0])]
+	var draw_want := func(ci, _t):
+		Art.draw_paper(ci, Rect2(0, 0, 520, 420))
+		Art.text(ci, Vector2(20, 40), title, 17, COL_INK)
+		if want.is_empty():
+			return
+		Art.text(ci, Vector2(20, 66), "Capas, de abajo hacia arriba:", 14, Color(0.35, 0.28, 0.2))
+		var rows: Array = ["PanAbajo"] + want + ["PanArriba"]
+		for k in rows.size():
+			var nm: String = rows[k]
+			var y := 380.0 - k * 40.0
+			var shown: String = {"PanAbajo": "Pan de abajo", "PanArriba": "Pan de arriba"}.get(nm, nm)
+			Art.draw_layer_bin(ci, Rect2(30, y - 34, 60, 38), nm)
+			Art.text(ci, Vector2(104, y - 8), shown, 17, COL_INK)
+			if k >= 1 and k <= want.size() and k - 1 < layers.size():
+				var good: bool = layers[k - 1] == nm
+				Art.text(ci, Vector2(300, y - 8), "bien" if good else "¡no va acá!", 15, Color("2f7a3a") if good else Color("c0281a"))
+	_painter(Rect2(740, 36, 520, 420), draw_want, false)
+
+
+func _armado_add(nm: String) -> void:
+	if burger_stack == null:
+		burger_stack = {"layers": [], "patty": null}
+	if nm == "Carne":
+		if burger_stack["patty"] != null:
+			_hint("Ya tiene la carne")
+			return
+		var pats := _patties()
+		if pats.is_empty():
+			_hint("No hay medallones en la bandeja: cociná uno en la plancha (Cocina)")
+			return
+		# El que está más cerca del punto que pidió el ticket elegido
+		var o = _get_order(selected_id)
+		var best: Dictionary = pats[0]
+		if o != null:
+			for p in pats:
+				if absf(p["t"] - _target_for(o, p["item"])) < absf(best["t"] - _target_for(o, best["item"])):
+					best = p
+		prepared.erase(best)
+		burger_stack["patty"] = best
+	if burger_stack["layers"].size() >= 8:
+		_hint("¡No entra nada más!")
+		return
+	burger_stack["layers"].append(nm)
+	_play_sfx("plato", -10.0)
+	_refresh_station()
+
+
+func _armado_undo() -> void:
+	if burger_stack == null or burger_stack["layers"].is_empty():
+		return
+	var last: String = burger_stack["layers"].pop_back()
+	if last == "Carne" and burger_stack["patty"] != null:
+		prepared.append(burger_stack["patty"])     # el medallón vuelve a la bandeja
+		burger_stack["patty"] = null
+	if burger_stack["layers"].is_empty():
+		burger_stack = null
+	_refresh_station()
+
+
+func _armado_close() -> void:
+	if burger_stack == null or burger_stack["patty"] == null:
+		_hint("Falta la carne: cociná un medallón y agregalo")
+		return
+	var p: Dictionary = burger_stack["patty"]
+	var layers: Array = burger_stack["layers"]
+	prepared.append({"item": "burger", "t": -1.0, "patty_t": p["t"], "vtarget": p.get("vtarget", 7.0), "burn": p["burn"],
+		"salt": p.get("salt", 0.0), "dirty": p.get("dirty", false), "layers": layers.duplicate(), "pantry": false, "chopped": false,
+		"label": "Hamburguesa (%d capas)" % layers.size()})
+	burger_stack = null
+	_play_sfx("plato", -6.0)
+	_hint("¡Hamburguesa armada! Está en la bandeja del Emplatado")
+	_refresh_all()
 
 
 # --- 3 (México). Tortillería: prensa de tortillas y molcajete ---
@@ -3753,7 +3921,7 @@ func _build_plating_station() -> void:
 		y += 30 + ceil(opts.size() / 4.0) * 92 + 4
 	var tops := [] if prebuilt else _cat_options(r["cat"], "toppings")
 	if prebuilt:
-		_tag("La pizza ya viene armada de la mesa", Vector2(x0, y), 15)
+		_tag("Ya viene armada desde la otra estación", Vector2(x0, y), 15)
 	if not tops.is_empty():
 		_tag("Toppings (mantené y desparramá)", Vector2(x0, y), 15)
 		for k in tops.size():
@@ -3857,8 +4025,12 @@ func _order_text(o) -> String:
 		lines.append("· " + _req_text(entry))
 	if not Data.RECIPES[o["recipe"]]["sauces"].is_empty():
 		lines.append("· " + (o["sauce"] if o["sauce"] != "" else "sin salsa"))
-	for t in o["toppings"]:
-		lines.append("+ " + t)
+	if o.has("layers"):
+		lines.append("Capas (de abajo arriba):")
+		lines.append("  " + " / ".join(PackedStringArray(o["layers"])))
+	else:
+		for t in o["toppings"]:
+			lines.append("+ " + t)
 	if o.get("drink", "") != "":
 		lines.append("Bebida: " + o["drink"])
 	return "\n".join(PackedStringArray(lines))
@@ -3885,7 +4057,9 @@ func _plate_text(o) -> String:
 func _unlocked_items(kind: String) -> Array:
 	var out := []
 	for r in recipes:
-		for part in Data.RECIPES[r]["parts"]:
+		var parts: Array = Data.RECIPES[r]["parts"].duplicate()
+		parts.append(Data.RECIPES[r].get("uses", []))     # lo que se usa adentro (por ejemplo, el medallón de la hamburguesa)
+		for part in parts:
 			for id in part:
 				if Data.ITEMS[id]["kind"] == kind and not id in out:
 					out.append(id)

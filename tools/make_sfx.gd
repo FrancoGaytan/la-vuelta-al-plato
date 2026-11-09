@@ -44,6 +44,8 @@ func _initialize() -> void:
 	rate = SR
 	rng.seed = 53
 	_save(_wine_pour(), "res://assets/sfx/vino.wav", 0.5)
+	rng.seed = 67
+	_save(_blender(), "res://assets/sfx/licuadora.wav", 0.45)
 	quit()
 
 
@@ -481,4 +483,17 @@ func _wine_pour() -> PackedFloat32Array:
 			_add(buf, s0 + k, sin(ph) * sin(PI * x) * 0.35)
 		t += rng.randf_range(0.17, 0.26)
 	_bubbles(buf, 60, 600.0, 1500.0, 0.06)
+	return buf
+
+
+## Licuadora: zumbido del motor y el remolino del líquido (frecuencias que entran justas en 4 s: loop sin salto)
+func _blender() -> PackedFloat32Array:
+	var swirl := _highpass(_lowpass(_noise(), 0.25), 0.02)
+	var buf := PackedFloat32Array()
+	buf.resize(_n())
+	for i in buf.size():
+		var t := float(i) / rate
+		var wob := 1.0 + 0.25 * sin(TAU * 5.0 * t)
+		var motor := sin(TAU * 250.0 * t) * 0.2 + sin(TAU * 500.0 * t) * 0.12 + sin(TAU * 750.0 * t) * 0.06 + sin(TAU * 1250.0 * t) * 0.03
+		buf[i] = motor * wob + swirl[i] * 0.9 * wob
 	return buf

@@ -44,6 +44,8 @@ func _center(i: int) -> Vector2:
 			return [Vector2(44, 236), Vector2(118, 246), Vector2(192, 236)][i]
 		"comal":
 			return [Vector2(72, 92), Vector2(164, 92), Vector2(72, 206), Vector2(164, 206)][i]
+		"licuadora":
+			return [Vector2(62, 150), Vector2(174, 150)][i]
 	return Vector2(64, 108 + i * 84)
 
 
@@ -59,6 +61,8 @@ func _basket_y(i: int) -> float:
 func _food_rect(i: int) -> Rect2:
 	var c := _center(i)
 	match kind:
+		"licuadora":
+			return Rect2(c - Vector2(40, 60), Vector2(80, 120))
 		"comal":
 			return Rect2(c - Vector2(40, 40), Vector2(80, 80))
 		"olla":
@@ -75,6 +79,8 @@ func _food_rect(i: int) -> Rect2:
 func _chip_rect(i: int) -> Rect2:
 	var c := _center(i)
 	match kind:
+		"licuadora":
+			return Rect2(c.x - 52, 290, 104, 30)
 		"comal":
 			return Rect2(c.x - 44, c.y + 40, 88, 28)
 		"olla":
@@ -90,6 +96,8 @@ func _chip_rect(i: int) -> Rect2:
 
 func _hit_rect(i: int) -> Rect2:
 	match kind:
+		"licuadora":
+			return Rect2(_center(i).x - 54, 30, 108, 292)
 		"comal":
 			return Rect2(_center(i) - Vector2(46, 44), Vector2(92, 112))
 		"olla":
@@ -155,6 +163,7 @@ func _draw() -> void:
 		"horno": _draw_oven(t)
 		"horno_lena": _draw_wood_oven(t)
 		"comal": _draw_comal(t)
+		"licuadora": _draw_blenders(t)
 	for i in slots.size():
 		if slots[i] != null:
 			_draw_chip(_chip_rect(i), slots[i], t)
@@ -698,3 +707,49 @@ func _draw_comal(t: float) -> void:
 		if s["ta"] > s["target"] * 0.8:
 			Art.steam(self, p + Vector2(0, -16), t, 0.6 if not _burning(s) else 1.6, i + 7,
 				Color.WHITE if maxf(s["ta"], s["tb"]) < s["burn"] else Color(0.3, 0.3, 0.3))
+
+
+const SHAKE_COLS := {"malteada_choco": Color("6e3a1e"), "malteada_frutilla": Color("f28aa8"), "malteada_vainilla": Color("f6e6b4")}
+
+
+## Licuadoras (EE.UU.): dos vasos sobre su motor; el helado se licúa y, si se pasa, queda aguado
+func _draw_blenders(t: float) -> void:
+	Art.rrect(self, Rect2(0, 250, 236, 80), Color("c8ccd0"), 10, Color("9aa3ab"), 3)
+	for i in 2:
+		var c := _center(i)
+		var s = slots[i]
+		# Motor
+		Art.rrect(self, Rect2(c.x - 44, 220, 88, 64), Color("d23a3a"), 12, Color("9a2222"), 2)
+		draw_circle(Vector2(c.x, 262), 9, Color("2a2a2a"))
+		draw_circle(Vector2(c.x, 262), 6, Color("4caf50") if s != null else Color("555555"))
+		# Vaso
+		var jar := PackedVector2Array([Vector2(c.x - 40, 40), Vector2(c.x + 40, 40), Vector2(c.x + 30, 214), Vector2(c.x - 30, 214)])
+		draw_colored_polygon(jar, Color(0.85, 0.93, 0.97, 0.35))
+		if s != null:
+			var col: Color = SHAKE_COLS.get(s["item"], Color.WHITE)
+			var p := clampf(s["t"] / s["target"], 0.0, 1.6)
+			# Aguada: se aclara y pierde cuerpo
+			if s["t"] > s["target"]:
+				col = col.lerp(Color(1, 1, 1, 0.6), clampf((s["t"] - s["target"]) / (s["burn"] - s["target"]), 0.0, 1.0) * 0.6)
+			var level := 214.0 - lerpf(70.0, 150.0, minf(p, 1.0))
+			var spin := t * 18.0
+			var liq := PackedVector2Array()
+			for k in 13:
+				var x := c.x - 38 + 76.0 * k / 12.0
+				var dip := 14.0 * (1.0 - absf(k - 6) / 6.0)   # remolino en el medio
+				liq.append(Vector2(clampf(x, c.x - 30 - (214 - level) * 0.057 - 8, c.x + 38), level + dip + sin(spin + k) * 2.0))
+			liq.append(Vector2(c.x + 30, 214))
+			liq.append(Vector2(c.x - 30, 214))
+			draw_colored_polygon(liq, col)
+			# Bochas de helado sin licuar al principio
+			if p < 0.6:
+				for k in 3:
+					draw_circle(Vector2(c.x - 14 + k * 14 + sin(spin * 0.3 + k) * 6, 190 - k * 8), 12.0 * (1.0 - p / 0.6) + 2, col.lightened(0.15))
+			for k in 4:
+				var a := spin + k * PI / 2.0
+				draw_line(Vector2(c.x + cos(a) * 20, level + 30 + k * 12), Vector2(c.x + cos(a + 0.6) * 24, level + 34 + k * 12), Color(1, 1, 1, 0.25), 2)
+		draw_polyline(PackedVector2Array([Vector2(c.x - 40, 40), Vector2(c.x - 30, 214), Vector2(c.x + 30, 214), Vector2(c.x + 40, 40)]), Color(0.7, 0.8, 0.85, 0.9), 3)
+		draw_line(Vector2(c.x - 30, 60), Vector2(c.x - 24, 200), Color(1, 1, 1, 0.4), 3)
+		Art.rrect(self, Rect2(c.x - 44, 28, 88, 16), Color("2a2a2a"), 6)
+		# Mango
+		draw_polyline(PackedVector2Array([Vector2(c.x + 40, 70), Vector2(c.x + 52, 74), Vector2(c.x + 50, 150), Vector2(c.x + 34, 156)]), Color(0.7, 0.8, 0.85, 0.9), 5)
