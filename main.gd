@@ -1096,6 +1096,7 @@ func _show_menu() -> void:
 		Art.draw_dining(ci, Rect2(0, 0, 1280, 720), menu_names, t, owned, current_country)
 		Art.draw_counter(ci, Rect2(0, 0, 1280, 720), 470, current_country)
 	var p := _painter(Rect2(0, 0, 1280, 720), draw_bg, true, bg)
+	p.fps = 12.0     # el salón solo anima detalles lentos (lámparas, ventilador)
 	p.mouse_filter = Control.MOUSE_FILTER_STOP
 	var light := func(ci, _t): Art.draw_lighting(ci, Rect2(0, 0, 1280, 720))
 	_painter(Rect2(0, 0, 1280, 720), light, false, bg)
@@ -1189,9 +1190,9 @@ func _show_title() -> void:
 		wm.cam = Vector2(fmod(t * 25.0, WorldMap.MW - 1280.0 / wm.zoom), 260.0 + sin(t * 0.2) * 80.0)
 		ci.draw_rect(Rect2(0, 0, 1280, 720), Color(0.1, 0.07, 0.05, 0.45))
 		Art.draw_lighting(ci, Rect2(0, 0, 1280, 720))
-	_painter(Rect2(0, 0, 1280, 720), drift, true, bg)
+	_painter(Rect2(0, 0, 1280, 720), drift, true, bg).fps = 24.0
 	var logo := func(ci, t): Art.draw_logo(ci, Vector2(640, 300), 1.25 + sin(t * 1.5) * 0.015, t)
-	_painter(Rect2(0, 0, 1280, 720), logo, true, bg)
+	_painter(Rect2(0, 0, 1280, 720), logo, true, bg).fps = 24.0
 	var sub := _label("Un viaje de cocina por el mundo", 22, Color("fdf6e3"), 5)
 	sub.position = Vector2(0, 492)
 	sub.size = Vector2(1280, 30)
@@ -1210,7 +1211,7 @@ func _show_title() -> void:
 			Art.draw_character(ci, look, Vector2(512, 672), 0.62, 0, t, true)
 			Art.text(ci, Vector2(552, 647), "Cocinera" if look.get("fem", false) else "Cocinero", 13, Color(1, 1, 1, 0.6))
 			Art.text(ci, Vector2(552, 670), nm, 20, Color.WHITE)
-		_painter(Rect2(0, 0, 1280, 720), who, true, bg)
+		_painter(Rect2(0, 0, 1280, 720), who, true, bg).fps = 20.0
 		var change := _button("Cambiar", _show_profiles, 14)
 		change.position = Vector2(712, 636)
 		bg.add_child(change)
@@ -1246,7 +1247,7 @@ func _show_map() -> void:
 		Art.text(ci, Vector2(90, 46), "La Vuelta al Plato", 26, Color("fdf6e3"))
 		Art.text(ci, Vector2(0, 46), "Ahorros: $%d" % savings, 22, Color("ffe08a"), HORIZONTAL_ALIGNMENT_RIGHT, 1080)
 		Art.text(ci, Vector2(380, 46), "Arrastrá el mapa para moverte · tocá una ciudad para viajar", 15, Color(1, 1, 1, 0.75))
-	_painter(Rect2(0, 0, 1280, 80), bar, true, bg)
+	_painter(Rect2(0, 0, 1280, 80), bar, true, bg).fps = 12.0
 	var back := _button("Título", _show_title, 15)
 	back.position = Vector2(1170, 22)
 	bg.add_child(back)
@@ -2823,7 +2824,7 @@ func _build_orders_station() -> void:
 	for r in recipes:
 		menu.append(Data.RECIPES[r]["name"])
 	var draw_bg := func(ci, t): Art.draw_dining(ci, Rect2(Vector2.ZERO, STATION_SIZE), menu, t, owned, current_country)
-	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, true)
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, true).fps = 12.0
 
 	for wk in walkers:
 		_add_customer_view(wk, false)
@@ -4467,7 +4468,7 @@ func _build_plating_station() -> void:
 func _build_delivery_station() -> void:
 	var o = _get_order(selected_id)
 	var draw_bg := func(ci, t): Art.draw_pass(ci, Rect2(Vector2.ZERO, STATION_SIZE), t)
-	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, true)
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, true).fps = 12.0
 
 	if not last_result.is_empty():
 		var res := last_result
@@ -4484,7 +4485,7 @@ func _build_delivery_station() -> void:
 			for k in lines.size():
 				Art.text(ci, Vector2(14 + (k % 2) * 130, 166 + (k / 2) * 22), lines[k], 13, Color(0.3, 0.25, 0.2))
 			Art.text(ci, Vector2(14, 250), "+$%d (propina $%d)" % [res["pay"], res["tip"]], 16, Color("2f7a3a"))
-		_painter(Rect2(990, 24, 274, 270), draw_res, true)
+		_painter(Rect2(990, 24, 274, 270), draw_res, true).fps = 12.0
 
 	if o == null:
 		_tag("Elegí un ticket de arriba para servir.", Vector2(12, 4), 16)
@@ -5137,7 +5138,7 @@ func _show_cook_editor(is_new: bool) -> void:
 		Art.rrect(ci, Rect2(170, 628, 320, 52), Color(0.12, 0.09, 0.07, 0.85), 12)
 		Art.text(ci, Vector2(170, 664), nm if nm != "" else "¿Cómo te llamás?", 26,
 			Color.WHITE if nm != "" else Color(1, 1, 1, 0.5), HORIZONTAL_ALIGNMENT_CENTER, 320)
-	_painter(Rect2(0, 0, 1280, 720), preview, true, bg)
+	_painter(Rect2(0, 0, 1280, 720), preview, true, bg).fps = 30.0
 	# Derecha: el nombre y las opciones
 	var card := _paper_card(Vector2(600, 0))
 	card.position = Vector2(640, 76)
@@ -5297,7 +5298,7 @@ func _show_profiles() -> void:
 			if cur:
 				Art.rrect(ci, Rect2(cx + cw / 2.0 - 70, 92, 140, 24), Color("e0b44a"), 12)
 				Art.text(ci, Vector2(cx, 109), "ÚLTIMO EN JUGAR", 12, Color("4a3410"), HORIZONTAL_ALIGNMENT_CENTER, cw)
-		_painter(Rect2(0, 0, 1280, 720), draw_card, true, bg)
+		_painter(Rect2(0, 0, 1280, 720), draw_card, true, bg).fps = 20.0
 		var play := _button("Jugar", _pick_profile.bind(pp, "jugar"), 18)
 		play.position = Vector2(cx + 20, 506)
 		play.custom_minimum_size = Vector2(cw - 40, 0)

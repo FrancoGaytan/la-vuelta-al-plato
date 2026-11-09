@@ -245,14 +245,24 @@ static func draw_entry(ci: CanvasItem, e: Dictionary, rect: Rect2) -> void:
 # Primitivas
 # =====================================================================
 
+static var _sb_cache := {}
+
+
+## Rectángulo redondeado. Los estilos se guardan y se reusan (crear uno nuevo en cada dibujo es caro).
 static func rrect(ci: CanvasItem, rect: Rect2, color: Color, radius := 8.0, border := Color(0, 0, 0, 0), bw := 0) -> void:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = color
-	sb.set_corner_radius_all(int(radius))
-	if bw > 0:
-		sb.border_color = border
-		sb.set_border_width_all(bw)
-	sb.anti_aliasing = true
+	var key := [color, int(radius), border if bw > 0 else Color(0, 0, 0, 0), bw]
+	var sb: StyleBoxFlat = _sb_cache.get(key)
+	if sb == null:
+		if _sb_cache.size() > 4000:
+			_sb_cache.clear()
+		sb = StyleBoxFlat.new()
+		sb.bg_color = color
+		sb.set_corner_radius_all(int(radius))
+		if bw > 0:
+			sb.border_color = border
+			sb.set_border_width_all(bw)
+		sb.anti_aliasing = true
+		_sb_cache[key] = sb
 	ci.draw_style_box(sb, rect)
 
 

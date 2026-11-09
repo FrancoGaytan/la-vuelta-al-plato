@@ -11,6 +11,7 @@ const Data = preload("res://data.gd")
 var kind := "olla"
 var slots: Array = []       # referencia a main.cookers[kind]: null o {item, t, target, burn}
 var show_zone := true
+var _acc := 0.0
 
 
 func _init() -> void:
@@ -27,7 +28,12 @@ func _process(_delta: float) -> void:
 			s["flip_vis"] = maxf(0.0, s["flip_vis"] - _delta * 4.0)
 		if s != null and s.get("toss_vis", 0.0) > 0.0:
 			s["toss_vis"] = maxf(0.0, s["toss_vis"] - _delta * 3.0)
-	queue_redraw()
+	# Redibujar a 30 cuadros por segundo alcanza para el hervor y el chisporroteo (y es la mitad de trabajo)
+	_acc += _delta
+	var vp := get_viewport()
+	if _acc >= 1.0 / 30.0 or (vp != null and vp.gui_is_dragging()):
+		_acc = fmod(_acc, 1.0 / 30.0)
+		queue_redraw()
 
 
 # --- Geometría de cada aparato ---

@@ -24,8 +24,15 @@ func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
-func _process(_delta: float) -> void:
-	queue_redraw()
+var _acc := 0.0
+
+
+## 30 cuadros por segundo alcanzan para respirar, parpadear y caminar (y el celu lo agradece)
+func _process(delta: float) -> void:
+	_acc += delta
+	if _acc >= 1.0 / 30.0:
+		_acc = fmod(_acc, 1.0 / 30.0)
+		queue_redraw()
 
 
 func _gui_input(event: InputEvent) -> void:

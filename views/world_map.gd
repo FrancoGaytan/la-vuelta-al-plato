@@ -165,6 +165,11 @@ func _travel_point(t: float) -> Vector2:
 	return a.lerp(mid, t).lerp(mid.lerp(b, t), t)
 
 
+var _last_cam := Vector2(-1, -1)
+var _last_zoom := -1.0
+var _idle_acc := 0.0
+
+
 func _process(delta: float) -> void:
 	if _travel_to != "":
 		var dist := city_pos(home).distance_to(city_pos(_travel_to))
@@ -188,7 +193,14 @@ func _process(delta: float) -> void:
 	if move != Vector2.ZERO and _travel_to == "":
 		cam += move.normalized() * 600.0 * delta / zoom
 		_clamp_cam()
-	queue_redraw()
+	# Redibujar es caro: a pleno solo si el mapa se mueve; quieto, alcanza con animar el mar despacio
+	var moving := _travel_to != "" or cam != _last_cam or zoom != _last_zoom
+	_last_cam = cam
+	_last_zoom = zoom
+	_idle_acc += delta
+	if moving or _idle_acc >= 1.0 / 12.0:
+		_idle_acc = 0.0
+		queue_redraw()
 
 
 # --- Mouse / dedo ---
