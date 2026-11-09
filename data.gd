@@ -151,7 +151,7 @@ const ITEMS := {
 	"flan": {"name": "Flan", "kind": "ready"},
 	# Italia. "built": se arma en la mesa de pizza (no sale de la heladera)
 	"pizza": {"name": "Pizza", "kind": "cook", "where": "horno_lena", "target": 9.0, "burn": 15.0, "built": true},
-	"fettuccine": {"name": "Fettuccine", "kind": "cook", "where": "olla", "salt": true, "target": 5.0, "burn": 10.0},
+	"fettuccine": {"name": "Fettuccine", "kind": "cook", "where": "olla", "salt": true, "target": 5.0, "burn": 10.0, "fresh": true},
 	"tiramisu": {"name": "Tiramisú", "kind": "ready"},
 }
 
@@ -219,7 +219,7 @@ const LEVELS := [
 const ITALY_LEVELS := [
 	{"name": "Giorno 1 · La pizzería", "new": ["pizza"], "customers": 5,
 		"interval": [28.0, 34.0], "patience": 110.0, "max_toppings": 2, "show_zone": true},
-	{"name": "Giorno 2 · Pasta fresca", "new": ["fettuccine", "tiramisu"], "customers": 6,
+	{"name": "Giorno 2 · Pasta fresca", "new": ["fettuccine", "tiramisu"], "customers": 6, "tip": "El fettuccine es fresco: amasalo en la Mesa (tecla 3, botón Pasta fresca). Harina, huevos en el volcán, frotá para amasar, pasá el palote y cortá las tiras. Cada tanda rinde 3 porciones: conviene amasar antes de que se junten los pedidos.",
 		"interval": [26.0, 32.0], "patience": 110.0, "max_toppings": 2, "show_zone": true},
 	{"name": "Giorno 3 · Noche romana", "new": [], "customers": 8, "drinks": true,
 		"interval": [25.0, 31.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
@@ -302,3 +302,10 @@ const DRINKS := {
 	"Limonada": {"color": Color("f3e27a"), "label": Color("4f9a48"), "kind": "botella"},
 	"Vino tinto": {"color": Color("6e0f22"), "label": Color("efe4c8"), "kind": "vino"},   # se sirve en copa: hay que llenarla con la botella
 }
+
+# Pasta fresca (Italia): se amasa a mano en la Mesa. Lo que lleva "fresh" en ITEMS no está en la heladera
+# hasta que se amasa: cada tanda rinde PASTA_YIELD porciones.
+const PASTA_KNEAD_PX := 2200.0   # cuánto hay que frotar (en píxeles de movimiento) para que la masa quede lisa
+const PASTA_ROLL_PX := 1700.0    # cuánto hay que pasar el palote
+const PASTA_CUTS := 7            # cortes para sacar las tiras
+const PASTA_YIELD := 3

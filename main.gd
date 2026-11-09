@@ -12,6 +12,7 @@ const ApplianceView = preload("res://views/appliance_view.gd")
 const BoardView = preload("res://views/board_view.gd")
 const PlateView = preload("res://views/plate_view.gd")
 const MesaView = preload("res://views/pizza_mesa_view.gd")
+const PastaView = preload("res://views/pasta_board_view.gd")
 const SinkView = preload("res://views/sink_view.gd")
 const RackView = preload("res://views/rack_view.gd")
 const TrashView = preload("res://views/trash_view.gd")
@@ -153,6 +154,11 @@ var closing_t := 0.0                  # segundos que quedan para lavar antes de 
 var close_button: Button = null
 var mesa_pizza = null                # Italia: la pizza que se está armando en la mesa {stretch, sauce, sprinkles, plate_toppings}
 var mesa_view = null
+var mesa_mode := "pizza"               # Italia: la Mesa sirve para pizza o para amasar pasta fresca
+var mesa_pasta = null                 # la pasta que se está amasando {stage, knead, roll, cuts, need_cuts}
+var pasta_view = null
+var fresh_pasta := 0                  # porciones de pasta fresca listas para la olla
+var knead_sound_t := 0.0
 var critic_at := -1                  # qué cliente del día es el crítico de la guía (-1 = hoy no viene)
 var critic_score := -1.0             # nota que le dio al plato (-1 = todavía no comió)
 var critic_name := ""
@@ -717,6 +723,7 @@ func _process(delta: float) -> void:
 	_update_salting(delta)
 	_update_washing(delta)
 	_update_pour(delta)
+	knead_sound_t -= delta
 	elapsed += delta
 
 	if spawned < level["customers"]:
@@ -803,7 +810,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key.keycode >= KEY_1 and key.keycode <= KEY_6:
 		_go_to_station(key.keycode - KEY_1)
 	elif key.keycode == KEY_SPACE and current_station == 2 and _uses_mesa():
-		_mesa_tap()
+		if mesa_mode == "pasta" and not _fresh_items().is_empty():
+			_pasta_tap()
+		else:
+			_mesa_tap()
 	elif key.keycode == KEY_SPACE and current_station == 2:
 		_chop()
 
@@ -1339,6 +1349,8 @@ func _show_intro(i: int) -> void:
 		tip = "Cada pedido viene con bebida: en la Entrega (tecla 5) arrastrala desde la heladera hasta la bandeja. El vino se sirve en copa: mantené la botella volcada sobre la copa hasta la parte más ancha."
 	elif not lv["show_zone"]:
 		tip = "Desde hoy la barra NO marca el punto: mirá el reloj, el termómetro de las carnes y el recetario (tecla R)."
+	if lv.has("tip"):
+		tip = lv["tip"]
 	if i == 0:
 		tip = "Cómo se juega:\n1. Pedidos: tomá el pedido del cliente del mostrador.\n" + \
 			"2. Cocina: arrastrá los ingredientes de la heladera al aparato y sacalos en su punto (click). Las carnes tienen termómetro. Lo de la plancha y la olla se sala con el salero.\n" + \
@@ -1393,6 +1405,10 @@ func _start_level(i: int) -> void:
 		cookers[a] = arr
 	board = null
 	prepared.clear()
+	mesa_pizza = null
+	mesa_pasta = null
+	mesa_mode = "pizza"
+	fresh_pasta = 0
 	mesa_pizza = null
 	# ¿Viene hoy el crítico de la guía? Llega mezclado entre los clientes (nunca primero ni último)
 	critic_at = -1
@@ -1748,6 +1764,12 @@ func _cook(item_id: String) -> void:
 	var idx := slots.find(null)
 	if idx == -1:
 		return
+	if info.get("fresh", false) and _uses_mesa():
+		# La pasta fresca primero hay que amasarla en la Mesa
+		if fresh_pasta <= 0:
+			_hint("No hay %s fresco: amasalo en la Mesa (tecla 3, botón Pasta fresca)" % info["name"].to_lower())
+			return
+		fresh_pasta -= 1
 	# El punto que marca la barra sale del ticket elegido (si pide ese ingrediente)
 	var o = _get_order(selected_id)
 	var target: float = _target_for(o, item_id) if o != null else info["target"]
@@ -2633,6 +2655,7 @@ func _refresh_station() -> void:
 	customer_views.clear()
 	kitchen_views.clear()
 	mesa_view = null
+	pasta_view = null
 	sink_view = null
 	rack_view = null
 	plating_plate = null
@@ -2857,6 +2880,12 @@ func _build_kitchen_station() -> void:
 			b.text = Data.ITEMS[id]["name"]
 			b.text_size = 13
 			b.tooltip_text = "Arrastralo hasta %s" % Data.APPLIANCES[Data.ITEMS[id]["where"]]["name"].to_lower()
+			if Data.ITEMS[id].get("fresh", false) and _uses_mesa():
+				# Pasta fresca: solo lo que se amasó en la Mesa
+				b.text = "%s (%d)" % [Data.ITEMS[id]["name"], fresh_pasta]
+				if fresh_pasta <= 0:
+					b.modulate.a = 0.45     # se puede tocar igual: avisa dónde se amasa
+				b.tooltip_text = "Pasta fresca: se amasa en la Mesa (tecla 3). Quedan %d porciones" % fresh_pasta
 			b.drag_data = {"kind": "raw", "item": id}
 			b.pressed.connect(_drag_hint.bind(id))
 	recipe_panel = null
@@ -3020,9 +3049,34 @@ func _uses_mesa() -> bool:
 	return Data.COUNTRIES[current_country].get("prep", "") == "mesa"
 
 
+## ¿Hoy hay pasta fresca en el menú? (entonces la Mesa también sirve para amasarla)
+func _fresh_items() -> Array:
+	return _unlocked_items("cook").filter(func(id): return Data.ITEMS[id].get("fresh", false))
+
+
+func _set_mesa_mode(m: String) -> void:
+	mesa_mode = m
+	_refresh_station()
+
+
 func _build_mesa_station() -> void:
 	var draw_bg := func(ci, _t): Art.draw_wood_counter(ci, Rect2(Vector2.ZERO, STATION_SIZE))
 	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
+	if not _fresh_items().is_empty():
+		# Arriba a la derecha: pizza o pasta fresca
+		var modes := HBoxContainer.new()
+		modes.position = Vector2(STATION_SIZE.x - 330, 2)
+		modes.add_theme_constant_override("separation", 6)
+		station_box.add_child(modes)
+		for m in [["pizza", "Pizza"], ["pasta", "Pasta fresca (%d)" % fresh_pasta]]:
+			var mb := _button(m[1], _set_mesa_mode.bind(m[0]), 14)
+			mb.custom_minimum_size = Vector2(150, 30)
+			if mesa_mode == m[0]:
+				mb.add_theme_stylebox_override("normal", _sb(COL_SELECTED, Color("8a5a2b")))
+			modes.add_child(mb)
+		if mesa_mode == "pasta":
+			_build_pasta_table()
+			return
 	var o = _get_order(selected_id)
 	var head := "Mesa de pizza  ·  estirá la masa, poné salsa e ingredientes y mandala al horno de leña"
 	if o != null:
@@ -3082,6 +3136,123 @@ func _build_mesa_station() -> void:
 	oven.custom_minimum_size = Vector2(280, 54)
 	oven.disabled = mesa_pizza == null or mesa_pizza["stretch"] < 1.0
 	station_box.add_child(oven)
+
+
+## Mesa en modo pasta: harina y huevos a la izquierda, la tabla en el medio, lo que hay listo a la derecha
+func _build_pasta_table() -> void:
+	_tag("Pasta fresca  ·  volcán de harina, huevos, amasar, estirar y cortar. Cada tanda rinde %d porciones" % Data.PASTA_YIELD, Vector2(12, 4), 15)
+	var flour := _prop(Rect2(20, 60, 150, 140))
+	flour.draw_fn = func(ci, r): Art.draw_flour_bag(ci, r)
+	flour.text = "Harina"
+	flour.text_size = 14
+	flour.drag_data = {"kind": "harina"}
+	flour.tooltip_text = "Arrastrala a la tabla (o tocala)"
+	flour.pressed.connect(_pasta_drop.bind({"kind": "harina"}))
+	var eggs := _prop(Rect2(20, 220, 150, 120))
+	eggs.draw_fn = func(ci, r): Art.draw_eggs(ci, r)
+	eggs.text = "Huevos"
+	eggs.text_size = 14
+	eggs.drag_data = {"kind": "huevo"}
+	eggs.tooltip_text = "Arrastralos al medio del volcán de harina (o tocalos)"
+	eggs.pressed.connect(_pasta_drop.bind({"kind": "huevo"}))
+	if mesa_pasta != null:
+		var drop := _button("Tirar la masa", _pasta_discard, 14)
+		drop.position = Vector2(30, 370)
+		station_box.add_child(drop)
+	pasta_view = PastaView.new()
+	pasta_view.position = Vector2(190, 40)
+	pasta_view.size = Vector2(560, 424)
+	pasta_view.pasta = mesa_pasta
+	pasta_view.dropped.connect(_pasta_drop)
+	pasta_view.worked.connect(_pasta_work)
+	pasta_view.tapped.connect(_pasta_tap)
+	station_box.add_child(pasta_view)
+	# Derecha: las porciones listas, como nidos de fettuccine
+	var n := fresh_pasta
+	var draw_ready := func(ci, _t):
+		Art.rrect(ci, Rect2(0, 0, 480, 380), Color(1, 1, 1, 0.12), 12, Color(1, 1, 1, 0.4), 2)
+		Art.text(ci, Vector2(0, 30), "PASTA FRESCA LISTA", 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 480, 4)
+		for k in mini(n, 8):
+			Art.draw_pasta_nest(ci, Vector2(70 + (k % 4) * 112, 110 + (k / 4) * 110), 46.0, k)
+		if n == 0:
+			Art.text(ci, Vector2(20, 150), "Todavía no hay: amasá una tanda.", 17, Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_CENTER, 440, 4)
+		Art.text(ci, Vector2(20, 300), "%d %s · van a la olla desde la heladera de la Cocina" % [n, "porción" if n == 1 else "porciones"],
+			15, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 440, 4)
+		Art.text(ci, Vector2(20, 330), "Consejo: amasá antes de que lleguen los pedidos", 14, Color(1, 1, 1, 0.75), HORIZONTAL_ALIGNMENT_CENTER, 440, 4)
+	_painter(Rect2(780, 60, 480, 380), draw_ready, false)
+
+
+func _pasta_drop(data: Dictionary) -> void:
+	match data.get("kind", ""):
+		"harina":
+			if mesa_pasta != null:
+				_hint("Ya hay masa en la tabla")
+				return
+			mesa_pasta = {"stage": 1, "knead": 0.0, "roll": 0.0, "cuts": 0, "need_cuts": Data.PASTA_CUTS}
+			_refresh_station()
+		"huevo":
+			if mesa_pasta == null:
+				_hint("Primero la harina: hacé el volcán")
+				return
+			if int(mesa_pasta["stage"]) != 1:
+				_hint("Los huevos ya están")
+				return
+			mesa_pasta["stage"] = 2
+			_refresh_station()
+
+
+## Frotar la masa (amasar) o pasar el palote (estirar): avanza según cuánto se movió la mano
+func _pasta_work(dist: float) -> void:
+	if mesa_pasta == null:
+		return
+	match int(mesa_pasta["stage"]):
+		2:
+			mesa_pasta["knead"] = minf(1.0, float(mesa_pasta["knead"]) + dist / Data.PASTA_KNEAD_PX)
+			if mesa_pasta["knead"] >= 1.0:
+				mesa_pasta["stage"] = 3
+				_hint("¡Masa lisa! Ahora estirala con el palote")
+		3:
+			mesa_pasta["roll"] = minf(1.0, float(mesa_pasta["roll"]) + dist / Data.PASTA_ROLL_PX)
+			if mesa_pasta["roll"] >= 1.0:
+				mesa_pasta["stage"] = 4
+				_hint("¡Lámina lista! Cortá las tiras: tocá la masa")
+		_:
+			return
+	if knead_sound_t <= 0.0:
+		_play_sfx("frotar", -6.0)
+		knead_sound_t = 0.3
+
+
+func _pasta_tap() -> void:
+	if mesa_pasta == null:
+		_hint("Arrastrá la harina a la tabla")
+		return
+	match int(mesa_pasta["stage"]):
+		1:
+			_hint("Faltan los huevos en el medio del volcán")
+		2:
+			_hint("Mantené apretado y frotá para amasar")
+		3:
+			_hint("Mantené apretado y pasá el palote")
+		4:
+			mesa_pasta["cuts"] = int(mesa_pasta["cuts"]) + 1
+			_play_sfx("corte%d" % (rng.randi() % 3 + 1), -4.0)
+			if pasta_view != null and is_instance_valid(pasta_view):
+				pasta_view.bump()
+			if int(mesa_pasta["cuts"]) >= int(mesa_pasta["need_cuts"]):
+				fresh_pasta += Data.PASTA_YIELD
+				mesa_pasta = null
+				_hint("¡%d porciones de fettuccine fresco! Están en la heladera de la Cocina" % Data.PASTA_YIELD)
+				_refresh_all()
+
+
+func _pasta_discard() -> void:
+	if mesa_pasta == null:
+		return
+	mesa_pasta = null
+	money -= Data.WASTE_COST["chop"]
+	_hint("Tiraste la masa: -$%d de la caja" % Data.WASTE_COST["chop"])
+	_refresh_station()
 
 
 func _mesa_place_dough() -> void:

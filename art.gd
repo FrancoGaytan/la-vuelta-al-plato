@@ -792,6 +792,59 @@ static func draw_dough(ci: CanvasItem, rect: Rect2) -> void:
 		ci.draw_circle(c + Vector2(cos(k * 2.0) * r * 0.6, sin(k * 1.3) * r * 0.5), 1.2, Color(1, 1, 1, 0.8))
 
 
+## Bolsa de harina de papel, abierta arriba
+static func draw_flour_bag(ci: CanvasItem, rect: Rect2) -> void:
+	var c := rect.get_center()
+	var h := minf(rect.size.y * 0.8, rect.size.x)
+	var w := h * 0.7
+	ellipse(ci, c + Vector2(4, h * 0.46), Vector2(w * 0.6, h * 0.08), Color(0, 0, 0, 0.2))
+	var bag := PackedVector2Array([c + Vector2(-w * 0.5, h * 0.45), c + Vector2(-w * 0.46, -h * 0.32), c + Vector2(-w * 0.3, -h * 0.42),
+		c + Vector2(w * 0.3, -h * 0.4), c + Vector2(w * 0.46, -h * 0.33), c + Vector2(w * 0.5, h * 0.45)])
+	ci.draw_colored_polygon(bag, Color("e8dcc0"))
+	ellipse(ci, c + Vector2(0, -h * 0.36), Vector2(w * 0.42, h * 0.08), Color("f8f4ea"))
+	rrect(ci, Rect2(c + Vector2(-w * 0.4, -h * 0.05), Vector2(w * 0.8, h * 0.3)), Color("2f6f9f"), 4)
+	text(ci, c + Vector2(-w * 0.4, h * 0.15), "FARINA", int(h * 0.11), Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, w * 0.8)
+	ci.draw_line(c + Vector2(-w * 0.3, -h * 0.2), c + Vector2(-w * 0.32, h * 0.4), Color(0, 0, 0, 0.08), 3)
+	for k in 5:
+		ci.draw_circle(c + Vector2(-w * 0.2 + k * w * 0.1, -h * 0.4 - (k % 2) * 4), 2.0, Color(1, 1, 1, 0.8))
+
+
+## Huevos en un cuenco
+static func draw_eggs(ci: CanvasItem, rect: Rect2) -> void:
+	var c := rect.get_center() + Vector2(0, 8)
+	var r := minf(rect.size.x * 0.4, rect.size.y * 0.5)
+	for k in 3:
+		var p := c + Vector2((k - 1) * r * 0.5, -r * 0.35 - (k % 2) * r * 0.12)
+		ellipse(ci, p, Vector2(r * 0.28, r * 0.36), Color("f3e4cc"))
+		ellipse(ci, p + Vector2(-r * 0.08, -r * 0.12), Vector2(r * 0.08, r * 0.12), Color(1, 1, 1, 0.5))
+	var bowl := PackedVector2Array()
+	for k in 17:
+		var a := PI * k / 16.0
+		bowl.append(c + Vector2(cos(a) * r, sin(a) * r * 0.6 - r * 0.1))
+	ci.draw_colored_polygon(bowl, Color("6f9fc4"))
+	ellipse(ci, c + Vector2(0, -r * 0.1), Vector2(r, r * 0.16), Color("4f7fa4"))
+	ellipse(ci, c + Vector2(-r * 0.5, r * 0.15), Vector2(r * 0.15, r * 0.08), Color(1, 1, 1, 0.25))
+
+
+## Nido de fettuccine fresco (crudo)
+static func draw_pasta_nest(ci: CanvasItem, c: Vector2, r: float, seed := 0) -> void:
+	ellipse(ci, c + Vector2(3, r * 0.5), Vector2(r * 1.0, r * 0.3), Color(0, 0, 0, 0.18))
+	ellipse(ci, c, Vector2(r, r * 0.72), Color("e2c06a"))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 40 + seed
+	for k in 9:
+		var rr := r * rng.randf_range(0.35, 0.95)
+		var a0 := rng.randf() * TAU
+		var pts := PackedVector2Array()
+		for i in 12:
+			var a := a0 + i * 0.32
+			pts.append(c + Vector2(cos(a) * rr, sin(a) * rr * 0.7))
+		ci.draw_polyline(pts, Color("f6dc8e") if k % 2 == 0 else Color("e9c872"), r * 0.13, true)
+	ellipse(ci, c + Vector2(-r * 0.3, -r * 0.3), Vector2(r * 0.25, r * 0.1), Color(1, 1, 1, 0.25))
+	for k in 6:
+		ci.draw_circle(c + Vector2(rng.randf_range(-r, r) * 0.7, rng.randf_range(-r, r) * 0.5), 1.4, Color(1, 1, 1, 0.8))
+
+
 ## Pizza vista desde arriba. pz = {stretch, sauce, sprinkles}. ta/tb = cocción de cada mitad (-1 = cruda).
 ## La mitad "a" (izquierda) es la que mira al fuego. rot = cuánto se giró (para dibujar los ingredientes).
 static func draw_pizza(ci: CanvasItem, rect: Rect2, pz: Dictionary, ta := -1.0, tb := -1.0, target := 9.0, burn := 15.0, rot := 0.0) -> void:
