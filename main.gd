@@ -184,6 +184,7 @@ var sushi_roll = null                  # Japón: el maki que se está armando {s
 var sushi_view = null
 var tips_on := true                   # consejos para el que juega por primera vez
 var tips_seen: Array = []             # consejos que ya se mostraron (por perfil)
+var tips_done := false                # ya jugó su primer día: los consejos no se muestran más
 var tip_refs := {}                    # cosas de la pantalla a las que puede señalar un consejo
 var tip_view: Control = null
 var tip_id := ""
@@ -684,9 +685,10 @@ func _toggle_pause() -> void:
 	var go := _button("Seguir cocinando", _resume, 22)
 	go.custom_minimum_size = Vector2(320, 56)
 	box.add_child(go)
-	var tb := _button("Consejos: " + ("sí" if tips_on else "no"), _toggle_tips, 16)
-	tb.tooltip_text = "Ayudas para el que juega por primera vez"
-	box.add_child(tb)
+	if not tips_done:
+		var tb := _button("Consejos: " + ("sí" if tips_on else "no"), _toggle_tips, 16)
+		tb.tooltip_text = "Ayudas para el que juega por primera vez"
+		box.add_child(tb)
 	box.add_child(_button("Reiniciar el día", _restart_from_pause, 18))
 	box.add_child(_button("Salir al menú", _quit_from_pause, 18))
 	_update_pause_button()
@@ -888,6 +890,12 @@ func _load_progress() -> void:
 		sfx_on = cfg.get_value("opciones", "sonidos", true)
 		tips_on = cfg.get_value("opciones", "consejos", true)
 		tips_seen = cfg.get_value("ayuda", "vistos", [])
+		# Partidas de antes de los consejos: si ya jugó algún día, no es su primera vez
+		var played := false
+		for cid in country_progress:
+			if not country_progress[cid].get("mejores", {}).is_empty():
+				played = true
+		tips_done = cfg.get_value("ayuda", "terminado", played)
 		country_progress = cfg.get_value("paises", "progreso", {})
 		owned_countries = cfg.get_value("paises", "locales", ["argentina"])
 		current_country = cfg.get_value("paises", "actual", "argentina")
@@ -912,12 +920,14 @@ func _save_progress() -> void:
 	cfg.set_value("opciones", "sonidos", sfx_on)
 	cfg.set_value("opciones", "consejos", tips_on)
 	cfg.set_value("ayuda", "vistos", tips_seen)
+	cfg.set_value("ayuda", "terminado", tips_done)
 	cfg.save(save_path)
 
 
 func _reset_progress() -> void:
 	savings = 0
 	tips_seen = []
+	tips_done = false
 	tips_on = true
 	owned = []
 	country_progress = {}
@@ -1417,7 +1427,7 @@ func _show_intro(i: int) -> void:
 		"creperie": step3 = "3. Crêperie: esparcí la masa de crêpe en círculos y mandala a la crepera; con la manga se decoran los éclairs.\n"
 		"especiero": step3 = "3. Especiero: agregá las especias de la masala dabba en el orden exacto del ticket.\n"
 		"esterilla": step3 = "3. Esterilla: alga, arroz frotando, el relleno pedido, enrollá deslizando hacia arriba y cortá.\n"
-	if i == 0 and tips_on:
+	if i == 0 and tips_on and not tips_done:
 		# Con los consejos prendidos no hace falta la guía: se aprende jugando
 		tip = "Tomá el pedido, cociná, armá el plato, servilo y lavá lo sucio. No te preocupes: mientras jugás te van a ir apareciendo consejos justo cuando los necesitás (se pueden apagar en la pausa).\n" + \
 			"Teclas 1 a 6: cambiar de estación.\n\n" + tip
@@ -1610,6 +1620,9 @@ func _finish_level() -> void:
 	if not best_scores.has(level_idx) or avg > best_scores[level_idx]:
 		best_scores[level_idx] = avg
 	savings = maxi(savings + money, 0)    # lo recaudado del día va a los ahorros
+	# Terminó su primer día: desde ahora ya sabe jugar y los consejos no vuelven
+	tips_done = true
+	_hide_tip(false)
 	# El crítico de la guía: si su plato llegó a la nota y el día se aprobó, el local gana una estrella
 	var critic_msg := ""
 	var star_won := 0
@@ -5077,6 +5090,7 @@ func _save_profiles() -> void:
 func _reset_state() -> void:
 	savings = 0
 	tips_seen = []
+	tips_done = false
 	tips_on = true
 	owned = []
 	country_progress = {}
@@ -5505,7 +5519,7 @@ func _appliance_view(a: String) -> Control:
 
 
 func _update_tips(delta: float) -> void:
-	if not tips_on or intro_t >= 0.0:
+	if not tips_on or tips_done or intro_t >= 0.0:
 		return
 	if tip_view != null:
 		tip_age += delta

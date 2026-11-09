@@ -48,7 +48,7 @@ const SALT_OK := Vector2(0.8, 2.2)
 # (sombrero, anteojos oscuros y libreta) en los días avanzados del local. Para ganar la estrella su plato
 # tiene que llegar a CRITIC_NEEDS[estrellas que ya tiene] y el día tiene que aprobarse.
 const GUIDE_NAME := "Guía del Buen Comer"
-const CRITIC_NEEDS := [78.0, 85.0, 91.0]
+const CRITIC_NEEDS := [85.0, 90.0, 94.0]
 const STAR_TIP := 2           # cada estrella del local suma $2 de propina por cliente
 
 
