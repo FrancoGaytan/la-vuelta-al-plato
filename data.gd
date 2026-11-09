@@ -44,6 +44,19 @@ const CLEANUP_TIME := 30.0  # al irse el último cliente, segundos para terminar
 const SALT_TIME := 1.0
 const SALT_OK := Vector2(0.8, 2.2)
 
+# Guía gastronómica: cada local puede ganar hasta 3 estrellas. Las da un crítico que viene de incógnito
+# (sombrero, anteojos oscuros y libreta) en los días avanzados del local. Para ganar la estrella su plato
+# tiene que llegar a CRITIC_NEEDS[estrellas que ya tiene] y el día tiene que aprobarse.
+const GUIDE_NAME := "Guía del Buen Comer"
+const CRITIC_NEEDS := [78.0, 85.0, 91.0]
+const STAR_TIP := 2           # cada estrella del local suma $2 de propina por cliente
+
+
+## Desde qué día (índice) puede venir el crítico a dar la estrella número stars+1
+static func critic_min_day(n_days: int, stars: int) -> int:
+	var days := [1, n_days / 2, n_days - 1]
+	return clampi(days[clampi(stars, 0, 2)], 1, maxi(n_days - 1, 1))
+
 
 ## Cuánto afecta la sal a la calidad de algo cocinado (1 = perfecto)
 static func salt_factor(id: String, salt: float) -> float:

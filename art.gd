@@ -1491,6 +1491,34 @@ static func stars(ci: CanvasItem, c: Vector2, r: float, n: int) -> void:
 		star(ci, c + Vector2((k - 1) * r * 2.3, 0), r, k < n)
 
 
+## Sello de la guía gastronómica: dorado con las estrellas ganadas (gris si no hay ninguna)
+static func draw_guide_seal(ci: CanvasItem, c: Vector2, r: float, n: int, time := 0.0) -> void:
+	var gold := Color("e0b44a") if n > 0 else Color("b9b2a6")
+	var dark := gold.darkened(0.35)
+	# Cintas que cuelgan
+	for side in [-1, 1]:
+		ci.draw_colored_polygon(PackedVector2Array([c + Vector2(side * 0.25, 0.5) * r, c + Vector2(side * 0.75, 1.45) * r,
+			c + Vector2(side * 0.5, 1.3) * r, c + Vector2(side * 0.35, 1.5) * r, c + Vector2(side * 0.05, 0.6) * r]),
+			Color("c0392b") if n > 0 else Color("8a8a8a"))
+	# Borde dentado
+	var pts := PackedVector2Array()
+	for k in 48:
+		var a := TAU * k / 48.0 + time * 0.2
+		pts.append(c + Vector2.from_angle(a) * r * (1.0 if k % 2 == 0 else 0.9))
+	ci.draw_colored_polygon(pts, gold)
+	ci.draw_circle(c, r * 0.78, dark)
+	ci.draw_circle(c, r * 0.72, gold.lightened(0.15))
+	text(ci, c + Vector2(-r, -r * 0.18), "GUÍA", int(r * 0.34), dark, HORIZONTAL_ALIGNMENT_CENTER, r * 2.0)
+	var sr := r * 0.17
+	for k in 3:
+		star(ci, c + Vector2((k - 1) * sr * 2.3, r * 0.28), sr, k < n)
+	# Brillo que pasa
+	if n > 0:
+		var g := fmod(time * 0.6, 3.0)
+		if g < 1.0:
+			ci.draw_line(c + Vector2(-0.8 + g * 1.6, -0.7) * r, c + Vector2(-1.1 + g * 1.6, 0.7) * r, Color(1, 1, 1, 0.35), r * 0.12)
+
+
 ## Lata o botella de bebida
 static func draw_drink(ci: CanvasItem, rect: Rect2, name: String, drinks: Dictionary) -> void:
 	var d: Dictionary = drinks.get(name, {"color": Color.WHITE, "label": Color.GRAY, "kind": "lata"})
@@ -1947,6 +1975,13 @@ static func chef_look() -> Dictionary:
 		"acc": 2, "w": 1.12, "seed": 3}
 
 
+## El crítico de la guía, de incógnito: sombrero, anteojos oscuros y una libreta donde anota todo
+static func critic_look(rng: RandomNumberGenerator) -> Dictionary:
+	return {"skin": SKINS[rng.randi() % SKINS.size()], "hair": HAIRS[rng.randi() % 3], "style": 0,
+		"shirt": Color("6b5644"), "cap": Color("3b3430"), "hat": "fedora", "acc": 5, "w": 1.0,
+		"seed": rng.randi() % 1000, "notepad": true, "writing": true, "critic": true}
+
+
 ## Dibuja un personaje (torso y cabeza). `pos` es el punto de abajo al centro.
 ## mood: 0 contento, 1 normal, 2 molesto, 3 enojado.
 static func draw_character(ci: CanvasItem, look: Dictionary, pos: Vector2, s: float, mood: int, time: float,
@@ -2078,6 +2113,12 @@ static func draw_character(ci: CanvasItem, look: Dictionary, pos: Vector2, s: fl
 		4:
 			for f in [Vector2(-18, 6), Vector2(-14, 9), Vector2(-20, 11), Vector2(18, 6), Vector2(14, 9), Vector2(20, 11)]:
 				ci.draw_circle(hc + f * s, 1.2 * s, skin.darkened(0.35))
+		5:
+			# Anteojos oscuros
+			for side in [-1, 1]:
+				rrect(ci, Rect2(hc + Vector2(side * 11 - 9, -6) * s, Vector2(18, 12) * s), Color("16181c"), 4 * s)
+				ci.draw_line(hc + Vector2(side * 11 - 5, -3) * s, hc + Vector2(side * 11 - 1, -3) * s, Color(1, 1, 1, 0.35), 1.5 * s)
+			ci.draw_line(hc + Vector2(-2, -2) * s, hc + Vector2(2, -2) * s, Color("16181c"), 2.5 * s)
 
 	if mood == 3:
 		steam(ci, hc + Vector2(-26, -34) * s, time * 2.0, 1.4, 1, Color(0.9, 0.9, 0.9))
@@ -2227,3 +2268,11 @@ static func _draw_headwear(ci: CanvasItem, look: Dictionary, hc: Vector2, s: flo
 			rrect(ci, Rect2(hc + Vector2(-6, -9) * s, Vector2(46, 8) * s), col.darkened(0.2), 4 * s)
 			ci.draw_circle(hc + Vector2(0, -33) * s, 3.5 * s, col.darkened(0.25))
 			ellipse(ci, hc + Vector2(-8, -24) * s, Vector2(10, 4) * s, Color(1, 1, 1, 0.2))
+		"fedora":
+			# Sombrero de ala corta con cinta
+			ellipse(ci, hc + Vector2(0, -22) * s, Vector2(44, 9) * s, col.darkened(0.15))
+			var crown := PackedVector2Array([hc + Vector2(-27, -22) * s, hc + Vector2(-23, -52) * s, hc + Vector2(-8, -57) * s,
+				hc + Vector2(0, -51) * s, hc + Vector2(8, -57) * s, hc + Vector2(23, -52) * s, hc + Vector2(27, -22) * s])
+			ci.draw_colored_polygon(crown, col)
+			ci.draw_rect(Rect2(hc + Vector2(-27, -32) * s, Vector2(54, 8) * s), Color("1d1a18"))
+			ellipse(ci, hc + Vector2(-12, -44) * s, Vector2(6, 9) * s, Color(1, 1, 1, 0.1))

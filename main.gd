@@ -153,6 +153,9 @@ var closing_t := 0.0                  # segundos que quedan para lavar antes de 
 var close_button: Button = null
 var mesa_pizza = null                # Italia: la pizza que se está armando en la mesa {stretch, sauce, sprinkles, plate_toppings}
 var mesa_view = null
+var critic_at := -1                  # qué cliente del día es el crítico de la guía (-1 = hoy no viene)
+var critic_score := -1.0             # nota que le dio al plato (-1 = todavía no comió)
+var critic_name := ""
 var pending_order: Dictionary = {}   # pedido que la moza está anotando
 var pending_timer := 0.0
 var waiter_look: Dictionary = {}
@@ -269,6 +272,8 @@ func _customer_leaves(c: Dictionary, is_order: bool) -> void:
 			pending_order = {}
 		queue.erase(c)
 	lost += 1
+	if c.get("critic", false):
+		critic_score = 0.0     # el crítico se fue sin comer: no hay estrella
 	walkers.append({"look": c["look"], "x": c.get("x", _queue_x(0)) if not is_order else _queue_x(0),
 		"bubble": "¡Me voy! ¡Qué servicio!", "dir": -1, "mood": 3})
 	_play_sfx("enojo2", 3.0)
@@ -886,6 +891,17 @@ func _reputation(id: String) -> int:
 	return int(sum / best.size())
 
 
+## Estrellas de la guía que tiene un local (0 a 3)
+func _guide_stars(id: String) -> int:
+	return int(country_progress.get(id, {}).get("estrellas", 0))
+
+
+## ¿Viene el crítico de la guía en este día? Solo si al local le faltan estrellas y el día es lo bastante avanzado.
+func _critic_comes(day: int) -> bool:
+	var st := _guide_stars(current_country)
+	return st < 3 and day >= Data.critic_min_day(_levels().size(), st)
+
+
 func _has(upgrade: String) -> bool:
 	return upgrade in owned
 
@@ -1048,12 +1064,32 @@ func _show_menu() -> void:
 	bg.add_child(chef)
 
 	var card := _paper_card(Vector2(560, 0))
-	card.position = Vector2(470, 40)
+	card.position = Vector2(470, 24)
 	bg.add_child(card)
 	var box: VBoxContainer = card.get_child(0)
 	var cdata: Dictionary = Data.COUNTRIES[current_country]
 	box.add_child(_label(cdata["restaurant"], 46, COL_INK))
 	box.add_child(_label("%s, %s  ·  reputación %d%%" % [cdata["city"], cdata["name"], _reputation(current_country)], 17, COL_INK))
+	# Estrellas de la guía: el sello y qué hace falta para la próxima
+	var gst := _guide_stars(current_country)
+	var grow := HBoxContainer.new()
+	grow.add_theme_constant_override("separation", 8)
+	box.add_child(grow)
+	var gseal := Painter.new()
+	gseal.custom_minimum_size = Vector2(56, 50)
+	gseal.animate = true
+	gseal.fn = func(ci, t): Art.draw_guide_seal(ci, Vector2(28, 22), 20.0, gst, t)
+	grow.add_child(gseal)
+	var gtxt := "%s: %d de 3 estrellas (+$%d de propina por cliente)" % [Data.GUIDE_NAME, gst, Data.STAR_TIP * gst]
+	if gst < 3:
+		var from_day := Data.critic_min_day(_levels().size(), gst) + 1
+		gtxt += "\nPróxima: desde el día %d viene un crítico de incógnito. Su plato tiene que llegar al %d%%." % [from_day, int(Data.CRITIC_NEEDS[gst])]
+	else:
+		gtxt += "\n¡Local con las tres estrellas de la guía!"
+	var gl := _label(gtxt, 14, COL_INK)
+	gl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	gl.custom_minimum_size = Vector2(460, 0)
+	grow.add_child(gl)
 	box.add_child(_spacer(2))
 	for i in _levels().size():
 		var lv: Dictionary = _levels()[i]
@@ -1063,7 +1099,7 @@ func _show_menu() -> void:
 		elif i > unlocked_level:
 			txt += "   (bloqueado)"
 		var b := _button(txt, _show_intro.bind(i), 19)
-		b.custom_minimum_size = Vector2(520, 46)
+		b.custom_minimum_size = Vector2(520, 42)
 		b.disabled = i > unlocked_level
 		box.add_child(b)
 	box.add_child(_spacer(4))
@@ -1317,6 +1353,8 @@ func _show_intro(i: int) -> void:
 	tl.add_theme_constant_override("line_spacing", -2)
 	box.add_child(tl)
 	box.add_child(_label("Necesitás un promedio de %d%% para pasar al día siguiente." % int(Data.PASS_SCORE), 14, COL_INK))
+	if _critic_comes(i):
+		box.add_child(_label("Dicen que hoy viene un crítico de la guía, de incógnito. Si le encanta su plato (%d%%), el local gana una estrella." % int(Data.CRITIC_NEEDS[_guide_stars(current_country)]), 14, Color("8a5a10")))
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", 12)
 	box.add_child(buttons)
@@ -1356,6 +1394,12 @@ func _start_level(i: int) -> void:
 	board = null
 	prepared.clear()
 	mesa_pizza = null
+	# ¿Viene hoy el crítico de la guía? Llega mezclado entre los clientes (nunca primero ni último)
+	critic_at = -1
+	critic_score = -1.0
+	critic_name = ""
+	if _critic_comes(i):
+		critic_at = rng.randi_range(2, maxi(2, int(level["customers"]) - 1))
 	# El día arranca con todo limpio
 	clean_stock = {}
 	for tk in Data.TOOLS:
@@ -1405,6 +1449,8 @@ func _start_day_intro() -> void:
 	var sub := "Clientes de hoy: %d  ·  ¡A cocinar!" % level["customers"]
 	if level.get("drinks", false):
 		sub = "Hoy los pedidos vienen con bebida"
+	if critic_at > 0:
+		sub = "Dicen que hoy viene un crítico de la guía..."
 	var p := Painter.new()
 	p.position = Vector2.ZERO
 	p.size = Vector2(1280, 720)
@@ -1468,6 +1514,26 @@ func _finish_level() -> void:
 	if not best_scores.has(level_idx) or avg > best_scores[level_idx]:
 		best_scores[level_idx] = avg
 	savings = maxi(savings + money, 0)    # lo recaudado del día va a los ahorros
+	# El crítico de la guía: si su plato llegó a la nota y el día se aprobó, el local gana una estrella
+	var critic_msg := ""
+	var star_won := 0
+	if critic_at > 0 and critic_score >= 0.0:
+		var st := _guide_stars(current_country)
+		var need: float = Data.CRITIC_NEEDS[st]
+		if passed and critic_score >= need:
+			star_won = st + 1
+			var cp: Dictionary = country_progress.get(current_country, {})
+			cp["estrellas"] = star_won
+			country_progress[current_country] = cp
+			critic_msg = "¡%s era el crítico de la %s! Le puso %d%% a tu plato:\n¡el local gana su %s estrella!" % [
+				critic_name, Data.GUIDE_NAME, int(critic_score), ["primera", "segunda", "tercera"][st]]
+		elif critic_score <= 0.0:
+			critic_msg = "%s era el crítico de la guía... y se fue sin comer. Va a volver otro día." % critic_name
+		elif not passed:
+			critic_msg = "%s era el crítico de la guía: le puso %d%% al plato, pero el día no se aprobó. Va a volver." % [critic_name, int(critic_score)]
+		else:
+			critic_msg = "%s era el crítico de la guía: le puso %d%% al plato y para la estrella hacía falta %d%%. Va a volver." % [
+				critic_name, int(critic_score), int(need)]
 	_save_progress()
 
 	var box := _open_overlay()
@@ -1489,6 +1555,22 @@ func _finish_level() -> void:
 	if dirty_left > 0:
 		box.add_child(_label("Quedaron %d cosas sin lavar: -%d de reputación" % [dirty_left, int(dirty_pen)], 18, Color("a8321e")))
 	box.add_child(_label("Recaudado hoy: $%d   ·   Ahorros: $%d" % [money, savings], 20, COL_INK))
+	if critic_msg != "":
+		var crow := HBoxContainer.new()
+		crow.add_theme_constant_override("separation", 10)
+		box.add_child(crow)
+		var seal := Painter.new()
+		seal.custom_minimum_size = Vector2(86, 70)
+		seal.animate = true
+		var won := star_won
+		seal.fn = func(ci, t): Art.draw_guide_seal(ci, Vector2(43, 35), 30.0, won, t)
+		crow.add_child(seal)
+		var cl := _label(critic_msg, 16, Color("8a5a10") if star_won > 0 else COL_INK)
+		cl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		cl.custom_minimum_size = Vector2(620, 0)
+		crow.add_child(cl)
+		if star_won > 0:
+			_play_sfx("timbre")
 	var msg := "¡Aprobado! Se desbloqueó el día siguiente." if passed else "Te faltó para el %d%%. ¡Probá de nuevo!" % int(Data.PASS_SCORE)
 	if passed and not has_next:
 		msg = "¡Completaste todos los días! Sos el chef del barrio."
@@ -1528,7 +1610,13 @@ func _queue_x(i: int) -> float:
 
 func _spawn_customer() -> void:
 	spawned += 1
-	queue.append({"name": _pick(NAMES), "arrived": elapsed, "look": Art.random_look(rng), "x": DOOR_X})
+	var c := {"name": _pick(NAMES), "arrived": elapsed, "look": Art.random_look(rng), "x": DOOR_X}
+	if spawned == critic_at:
+		c["look"] = Art.critic_look(rng)
+		c["critic"] = true
+		critic_name = c["name"]
+		_hint("Entró alguien de sombrero y anteojos oscuros que anota todo... ¿será el crítico de la guía?")
+	queue.append(c)
 	_play_sfx("campanita")
 	if current_station == 0:
 		_refresh_station()
@@ -1627,6 +1715,7 @@ func _make_order(c: Dictionary) -> Dictionary:
 		"look": c["look"],
 		"arrived": c["arrived"],
 		"heard": c.get("heard", 1),
+		"critic": c.get("critic", false),
 		"recipe": rkey,
 		"items": items,
 		"sauce": sauce,
@@ -2248,6 +2337,7 @@ func _deliver() -> void:
 		tip += 1
 	if _has("vajilla"):
 		tip += 3
+	tip += Data.STAR_TIP * _guide_stars(current_country)   # un local con estrellas de la guía deja más propina
 	var pay := 15 + tip
 
 	var verdict := "Mmm... no vuelvo"
@@ -2267,6 +2357,10 @@ func _deliver() -> void:
 		last_result["lines"].append("¡Plato sucio! -25%")
 	if o.get("drink", "") == "Vino tinto" and o.get("plate_drink", "") == "Vino tinto":
 		last_result["lines"].append("Copa: %s" % Data.wine_desc(o.get("wine_fill", 0.0), o.get("wine_spill", 0.0)))
+	if o.get("critic", false):
+		critic_score = total
+		last_result["verdict"] = "Mmm... (anota en la libreta)"
+		_hint("El de anteojos oscuros probó, anotó algo y no dijo nada... al cerrar vas a saber qué escribió")
 
 	served += 1
 	score_sum += total
