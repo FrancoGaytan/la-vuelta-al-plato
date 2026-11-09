@@ -25,6 +25,8 @@ func _process(_delta: float) -> void:
 			s["rot_vis"] = lerpf(s.get("rot_vis", 0.0), s["rot"], 0.25)
 		if s != null and s.get("flip_vis", 0.0) > 0.0:
 			s["flip_vis"] = maxf(0.0, s["flip_vis"] - _delta * 4.0)
+		if s != null and s.get("toss_vis", 0.0) > 0.0:
+			s["toss_vis"] = maxf(0.0, s["toss_vis"] - _delta * 3.0)
 	queue_redraw()
 
 
@@ -50,6 +52,8 @@ func _center(i: int) -> Vector2:
 			return [Vector2(118, 82), Vector2(118, 222)][i]
 		"tandoor":
 			return [Vector2(66, 108), Vector2(170, 108), Vector2(118, 226)][i]
+		"wok":
+			return [Vector2(118, 84), Vector2(118, 228)][i]
 	return Vector2(64, 108 + i * 84)
 
 
@@ -65,6 +69,9 @@ func _basket_y(i: int) -> float:
 func _food_rect(i: int) -> Rect2:
 	var c := _center(i)
 	match kind:
+		"wok":
+			var up: float = sin(float(slots[i].get("toss_vis", 0.0)) * PI) * 22.0 if slots[i] != null else 0.0
+			return Rect2(c - Vector2(40, 36 + up), Vector2(80, 72))
 		"tandoor":
 			return Rect2(c - Vector2(36, 34), Vector2(72, 68))
 		"crepera":
@@ -87,6 +94,8 @@ func _food_rect(i: int) -> Rect2:
 func _chip_rect(i: int) -> Rect2:
 	var c := _center(i)
 	match kind:
+		"wok":
+			return Rect2(c.x + 20, c.y + 36, 100, 28)
 		"tandoor":
 			return Rect2(c.x - 50, c.y + 36, 100, 28)
 		"crepera":
@@ -108,6 +117,8 @@ func _chip_rect(i: int) -> Rect2:
 
 func _hit_rect(i: int) -> Rect2:
 	match kind:
+		"wok":
+			return Rect2(_center(i) - Vector2(90, 60), Vector2(210, 128))
 		"tandoor":
 			return Rect2(_center(i) - Vector2(50, 40), Vector2(100, 108))
 		"crepera":
@@ -144,6 +155,11 @@ func _gui_input(event: InputEvent) -> void:
 			s["ta"] = s["tb"]
 			s["tb"] = ta
 			s["rot"] = s.get("rot", 0.0) + PI
+			return
+		if kind == "wok" and not _chip_rect(i).has_point(mb.position):
+			# Saltear: la comida salta y deja de pegarse
+			slots[i]["stick"] = 0.0
+			slots[i]["toss_vis"] = 1.0
 			return
 		if kind in ["comal", "crepera"] and not _chip_rect(i).has_point(mb.position):
 			# Tocar la tortilla: se da vuelta (el lado cocido queda arriba)
@@ -182,6 +198,7 @@ func _draw() -> void:
 		"licuadora": _draw_blenders(t)
 		"crepera": _draw_crepera(t)
 		"tandoor": _draw_tandoor(t)
+		"wok": _draw_woks(t)
 	for i in slots.size():
 		if slots[i] != null:
 			_draw_chip(_chip_rect(i), slots[i], t)
@@ -819,4 +836,29 @@ func _draw_tandoor(t: float) -> void:
 			continue
 		_food(i, s)
 		Art.steam(self, _center(i) + Vector2(0, -16), t, 0.6 if not _burning(s) else 1.6, i + 13,
+			Color.WHITE if s["t"] < s["burn"] else Color(0.3, 0.3, 0.3))
+
+
+## Woks (Japón): dos sartenes hondas sobre hornallas fuertes. Tocar la comida la saltea.
+func _draw_woks(t: float) -> void:
+	Art.rrect(self, Rect2(0, 0, 236, 330), Color("2e3034"), 12, Color("4a4f55"), 4)
+	for i in 2:
+		var c := _center(i)
+		var s = slots[i]
+		Art.flames(self, c + Vector2(0, 50), 26.0 if s != null else 16.0, t)
+		# Mango largo y el wok
+		Art.rrect(self, Rect2(c + Vector2(-112, -8), Vector2(40, 14)), Color("6b4a2a"), 6)
+		Art.ellipse(self, c + Vector2(0, 6), Vector2(78, 50), Color(0, 0, 0, 0.35))
+		Art.ellipse(self, c, Vector2(76, 48), Color("1c1d20"))
+		Art.ellipse(self, c + Vector2(0, -2), Vector2(66, 40), Color("34363a"))
+		draw_arc(c, 70, PI * 1.1, PI * 1.5, 16, Color(1, 1, 1, 0.12), 3)
+		if s == null:
+			continue
+		_food(i, s)
+		var stick: float = s.get("stick", 0.0)
+		if stick > Data.WOK_STICK * 0.6:
+			var urgent := stick > Data.WOK_STICK
+			var a := 0.6 + 0.4 * sin(t * (14.0 if urgent else 8.0))
+			Art.text(self, c + Vector2(-70, -46), "¡se pega!" if urgent else "¡salteá!", 15, Color(1, 0.35, 0.2, a) if urgent else Color(1, 0.85, 0.3, a), HORIZONTAL_ALIGNMENT_CENTER, 140, 4)
+		Art.steam(self, c + Vector2(0, -24), t, 0.8 if not _burning(s) else 1.8, i + 17,
 			Color.WHITE if s["t"] < s["burn"] else Color(0.3, 0.3, 0.3))

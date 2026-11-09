@@ -20,6 +20,7 @@ const SAUCE_COLORS := {
 	"Miel de maple": Color("b8661a"),
 	"Choco-avellanas": Color("5a3218"), "Caramelo": Color("c8862a"), "Limón y azúcar": Color("f2e48a"), "Bechamel": Color("f6f0dc"),
 	"Raita": Color("f2f2e8"), "Chutney de menta": Color("4f9a3a"),
+	"Shoyu": Color("8a4a1e"), "Miso": Color("c8964a"), "Tonkotsu": Color("f2ead2"), "Salsa yakisoba": Color("6a3018"), "Teriyaki": Color("7a3a14"),
 	"Chocolate": Color("4a2412"), "Café": Color("a0703a"), "Frutilla": Color("f28aa8"),
 }
 
@@ -71,6 +72,18 @@ const TOPPINGS := {
 	"Cilantro": {"color": Color("3f8f2f"), "shape": "leaf"},
 	"Yogur": {"color": Color("fbfbf4"), "shape": "dollop"},
 	"Cebolla morada": {"color": Color("a84a8a"), "shape": "ring"},
+	# Japón
+	"Salmón": {"color": Color("f28a5a"), "shape": "square"},
+	"Palta": {"color": Color("8ab83a"), "shape": "slice"},
+	"Pepino": {"color": Color("5a9a3a"), "shape": "slice"},
+	"Queso crema": {"color": Color("fbf6ea"), "shape": "dollop"},
+	"Kanikama": {"color": Color("e8503a"), "shape": "strip"},
+	"Huevo marinado": {"color": Color("ffffff"), "shape": "egg_half"},
+	"Cebollita": {"color": Color("6fbf4a"), "shape": "ring"},
+	"Nori": {"color": Color("1d2a1e"), "shape": "square"},
+	"Chashu": {"color": Color("c8865a"), "shape": "disc"},
+	"Sésamo": {"color": Color("f2e6c8"), "shape": "seed"},
+	"Jengibre rojo": {"color": Color("e8506a"), "shape": "strip"},
 }
 
 const SKINS := [Color("f9d7b9"), Color("f1c19a"), Color("d9a074"), Color("b97a4f"), Color("8d5a3b"), Color("6b4228")]
@@ -207,6 +220,9 @@ static func draw_cooking(ci: CanvasItem, id: String, rect: Rect2, t: float, targ
 
 ## Dibuja una preparación (cocida, cortada o de la despensa).
 static func draw_entry(ci: CanvasItem, e: Dictionary, rect: Rect2) -> void:
+	if e.has("fillings"):
+		draw_maki(ci, rect, e["fillings"])
+		return
 	if e.has("spices"):
 		draw_masala(ci, rect, e["spices"])
 		return
@@ -878,6 +894,48 @@ static func draw_topping_icon(ci: CanvasItem, c: Vector2, s: float, name: String
 				var oc: Vector2 = P.call(-9 + k * 9, (k % 2) * 6 - 3)
 				ci.draw_arc(oc, 7 * u, 0, TAU, 16, Color("a84a8a"), 2.5 * u)
 				ci.draw_arc(oc, 4 * u, 0, TAU, 12, Color("e8c8e0"), 1.5 * u)
+		"Salmón":
+			rrect(ci, Rect2(P.call(-14, -8), Vector2(28, 16) * u), Color("f28a5a"), 3 * u)
+			for k in 4:
+				ci.draw_line(P.call(-10 + k * 7, -8), P.call(-14 + k * 7, 8), Color("fbd2b8"), 1.6 * u)
+		"Palta":
+			ellipse(ci, P.call(0, 2), Vector2(13, 15) * u, Color("2f4a1a"))
+			ellipse(ci, P.call(0, 2), Vector2(11, 13) * u, Color("cfe08a"))
+			ci.draw_circle(P.call(0, 5), 5 * u, Color("7a4a24"))
+		"Pepino":
+			for k in 3:
+				var pc2: Vector2 = P.call(-9 + k * 9, (k % 2) * 5 - 2)
+				ci.draw_circle(pc2, 7 * u, Color("3f7a28"))
+				ci.draw_circle(pc2, 5.5 * u, Color("c8e8a0"))
+				ci.draw_circle(pc2, 1.5 * u, Color("8ab86a"))
+		"Queso crema":
+			rrect(ci, Rect2(P.call(-13, -6), Vector2(26, 14) * u), Color("fbf6ea"), 4 * u, Color("e2d8c0"), 1)
+			ellipse(ci, P.call(-4, -3), Vector2(6, 2) * u, Color(1, 1, 1, 0.9))
+		"Kanikama":
+			for k in 3:
+				rrect(ci, Rect2(P.call(-14, -10 + k * 8), Vector2(28, 6) * u), Color("f8f2ea"), 3 * u)
+				rrect(ci, Rect2(P.call(-14, -10 + k * 8), Vector2(28, 3) * u), Color("e8503a"), 2 * u)
+		"Huevo marinado":
+			ellipse(ci, P.call(0, 2), Vector2(13, 11) * u, Color("e8c08a"))
+			ci.draw_circle(P.call(0, 2), 6 * u, Color("f2a81d"))
+			ci.draw_circle(P.call(-1, 1), 2.5 * u, Color("f6c84a"))
+		"Cebollita":
+			for k in 5:
+				var cc2: Vector2 = P.call(-10 + (k % 3) * 10, -4 + (k / 3) * 9)
+				ci.draw_arc(cc2, 4 * u, 0, TAU, 12, Color("6fbf4a"), 2 * u)
+		"Nori":
+			rrect(ci, Rect2(P.call(-12, -12), Vector2(24, 24) * u), Color("1d2a1e"), 2 * u)
+			ci.draw_line(P.call(-8, -8), P.call(6, -8), Color(1, 1, 1, 0.12), 1.5 * u)
+		"Chashu":
+			ci.draw_circle(P.call(0, 2), 13 * u, Color("8a4a1e"))
+			ci.draw_circle(P.call(0, 2), 10 * u, Color("e8a87a"))
+			ci.draw_arc(P.call(0, 2), 6 * u, 0, 4.5, 12, Color("fbe0c8"), 2 * u)
+		"Sésamo":
+			for k in 9:
+				ellipse(ci, P.call(-10 + (k % 3) * 10, -8 + (k / 3) * 8), Vector2(2.4, 1.4) * u, Color("f2e6c8") if k % 2 == 0 else Color("3a3a3a"))
+		"Jengibre rojo":
+			for k in 4:
+				ci.draw_line(P.call(-12 + k * 6, -10), P.call(-8 + k * 6, 10), Color("e8506a"), 3 * u)
 		_:
 			text(ci, c + Vector2(-s, 4), name.left(1), int(s * 0.6), INK, HORIZONTAL_ALIGNMENT_CENTER, s * 2)
 
@@ -1994,6 +2052,9 @@ static func draw_dining(ci: CanvasItem, rect: Rect2, menu: Array, time: float, d
 	if theme == "india":
 		draw_dining_india(ci, rect, menu, time, decor)
 		return
+	if theme == "japon":
+		draw_dining_japon(ci, rect, menu, time, decor)
+		return
 	var o := rect.position
 	grad_rect(ci, rect, Color("f1dfbd"), Color("e2c79c"))
 	for i in int(rect.size.x / 48.0) + 1:
@@ -2078,6 +2139,9 @@ static func draw_counter(ci: CanvasItem, rect: Rect2, top: float, theme := "arge
 		return
 	if theme == "india":
 		draw_counter_india(ci, rect, top)
+		return
+	if theme == "japon":
+		draw_counter_japon(ci, rect, top)
 		return
 	var y := rect.position.y + top
 	ci.draw_rect(Rect2(rect.position.x, y + 18, rect.size.x, rect.end.y - y - 18), Color("6e4527"))
@@ -3112,4 +3176,119 @@ static func draw_counter_india(ci: CanvasItem, rect: Rect2, top: float) -> void:
 		ci.draw_circle(c, 7, Color.WHITE)
 	grad_rect(ci, Rect2(rect.position.x, y, rect.size.x, 20), Color("c9a24a"), Color("8a6a1e"))
 	ci.draw_rect(Rect2(rect.position.x, y + 3, rect.size.x, 2), Color(1, 1, 1, 0.3))
+	ci.draw_rect(Rect2(rect.position.x, y + 20, rect.size.x, 6), Color(0, 0, 0, 0.3))
+
+
+# --- Japón ---
+
+## Pila de hojas de alga nori
+static func draw_nori_stack(ci: CanvasItem, rect: Rect2) -> void:
+	var c := rect.get_center()
+	var w := rect.size.x * 0.7
+	var h := rect.size.y * 0.5
+	for k in 4:
+		var off := Vector2(-k * 3, -k * 4)
+		rrect(ci, Rect2(c - Vector2(w, h) / 2.0 + off + Vector2(4, 6), Vector2(w, h)), Color(0, 0, 0, 0.12), 3)
+		rrect(ci, Rect2(c - Vector2(w, h) / 2.0 + off, Vector2(w, h)), Color("1d2a1e") if k % 2 == 0 else Color("24331f"), 3)
+	ci.draw_line(c + Vector2(-w * 0.4, -h * 0.3 - 12), c + Vector2(w * 0.2, -h * 0.3 - 12), Color(1, 1, 1, 0.12), 2)
+
+
+## Piezas de maki con su relleno
+static func draw_maki(ci: CanvasItem, rect: Rect2, fillings: Array) -> void:
+	var cols := {"Salmón": Color("f28a5a"), "Palta": Color("8ab83a"), "Pepino": Color("5a9a3a"), "Queso crema": Color("fbf6ea"), "Kanikama": Color("e8503a")}
+	var c := rect.get_center()
+	var r := minf(rect.size.x, rect.size.y) * 0.17
+	for k in 6:
+		var p := c + Vector2.from_angle(k * TAU / 6.0) * r * 1.9
+		ci.draw_circle(p + Vector2(1, 3), r, Color(0, 0, 0, 0.2))
+		ci.draw_circle(p, r, Color("1d2a1e"))
+		ci.draw_circle(p, r * 0.82, Color("fbfbf4"))
+		for f in fillings.size():
+			ci.draw_circle(p + Vector2.from_angle(f * TAU / maxf(fillings.size(), 1)) * r * 0.25 * float(fillings.size() > 1), r * 0.28, cols.get(fillings[f], Color.WHITE))
+	# Jengibre y wasabi al costado
+	ellipse(ci, c + Vector2(0, 0), Vector2(r * 0.5, r * 0.4), Color("8ab83a"))
+
+
+## Salón de Sakura Ramen (Japón): madera clara, faroles de papel, noren en la puerta y el Fuji con cerezos
+static func draw_dining_japon(ci: CanvasItem, rect: Rect2, menu: Array, time: float, decor: Array) -> void:
+	var o := rect.position
+	grad_rect(ci, rect, Color("f2e6cc"), Color("e2d2ae"))
+	# Vigas y paneles de papel (shoji)
+	for x in range(0, int(rect.size.x), 120):
+		ci.draw_rect(Rect2(o.x + x, o.y, 8, 228), Color("8a6a42"))
+	ci.draw_rect(Rect2(o.x, o.y + 12, rect.size.x, 8), Color("6b4a2a"))
+	var z := Rect2(o.x, o.y + 228, rect.size.x, rect.size.y - 228)
+	ci.draw_rect(z, Color("c8a46a"))
+	for x in range(0, int(rect.size.x), 18):
+		ci.draw_line(Vector2(o.x + x, z.position.y), Vector2(o.x + x, z.end.y), Color(0, 0, 0, 0.1), 2)
+	ci.draw_rect(Rect2(o.x, o.y + 222, rect.size.x, 8), Color("6b4a2a"))
+	# Puerta corrediza con la cortina noren y el cartel ABIERTO
+	var d := Rect2(o.x + 30, o.y + 40, 150, 290)
+	ci.draw_rect(d, Color("8a6a42"))
+	ci.draw_rect(d.grow(-10), Color("f6f0e0"))
+	for k in 4:
+		ci.draw_line(Vector2(d.position.x + 10, d.position.y + 40 + k * 60), Vector2(d.end.x - 10, d.position.y + 40 + k * 60), Color("8a6a42"), 3)
+	ci.draw_line(Vector2(d.get_center().x, d.position.y + 10), Vector2(d.get_center().x, d.end.y - 10), Color("8a6a42"), 3)
+	for k in 3:
+		var nr := Rect2(d.position.x + 6 + k * 46, d.position.y + 4, 44, 52)
+		ci.draw_rect(nr, Color("1f3a6a"))
+		ci.draw_circle(nr.position + Vector2(22, 30), 9, Color("f6f0e0"))
+	rrect(ci, Rect2(d.position + Vector2(28, 64), Vector2(94, 30)), Color("c0281a"), 6, Color("f6e7c8"), 2)
+	text(ci, d.position + Vector2(28, 85), "ABIERTO", 15, Color("f4efe0"), HORIZONTAL_ALIGNMENT_CENTER, 94)
+	# Ventana redonda con el monte Fuji y un cerezo
+	var wc := o + Vector2(520, 130)
+	ci.draw_circle(wc, 96, Color("6b4a2a"))
+	ci.draw_circle(wc, 88, Color("cfe6f6"))
+	ci.draw_circle(wc + Vector2(36, -40), 14, Color("f28a5a"))
+	ci.draw_colored_polygon(PackedVector2Array([wc + Vector2(-80, 50), wc + Vector2(-8, -36), wc + Vector2(8, -36), wc + Vector2(80, 50)]), Color("6a7a9a"))
+	ci.draw_colored_polygon(PackedVector2Array([wc + Vector2(-20, -22), wc + Vector2(-8, -36), wc + Vector2(8, -36), wc + Vector2(20, -22), wc + Vector2(8, -18), wc + Vector2(0, -24), wc + Vector2(-8, -18)]), Color.WHITE)
+	ci.draw_rect(Rect2(wc + Vector2(-88, 46), Vector2(176, 44)), Color("7aa85a"))
+	ci.draw_arc(wc, 90, 0, TAU, 48, Color("6b4a2a"), 6)
+	# Rama de cerezo que cruza
+	var br := o + Vector2(620, 40)
+	ci.draw_polyline(PackedVector2Array([br, br + Vector2(-60, 40), br + Vector2(-120, 50), br + Vector2(-170, 90)]), Color("5a3a2a"), 5)
+	for k in 16:
+		var p := br + Vector2(-k * 11, 6 + k * 4.5) + Vector2(sin(k * 2.1) * 10, cos(k * 1.7) * 8)
+		for j in 5:
+			ci.draw_circle(p + Vector2.from_angle(j * TAU / 5.0) * 4, 3.5, Color("f8c8d8"))
+		ci.draw_circle(p, 2, Color("e8608a"))
+	# Pétalos que caen
+	for k in 6:
+		var fy := fmod(time * 18.0 + k * 50.0, 200.0)
+		ci.draw_circle(o + Vector2(470 + k * 30 + sin(time + k) * 12, 40 + fy), 2.5, Color(0.97, 0.78, 0.85, 1.0 - fy / 200.0))
+	# Faroles de papel rojos
+	for x in [700.0, 760.0, 820.0]:
+		var lp := o + Vector2(x, 30)
+		ci.draw_line(lp + Vector2(0, -20), lp, Color("3a2a1a"), 2)
+		ellipse(ci, lp + Vector2(0, 24), Vector2(20, 26), Color("d0281a"))
+		for k in 4:
+			ci.draw_arc(lp + Vector2(0, 24), 20 - k * 0.5, PI * 0.15, PI * 0.85, 10, Color(0, 0, 0, 0.15), 1.5)
+		rrect(ci, Rect2(lp + Vector2(-10, -2), Vector2(20, 5)), Color("2a1a10"), 2)
+		rrect(ci, Rect2(lp + Vector2(-10, 48), Vector2(20, 5)), Color("2a1a10"), 2)
+		ellipse(ci, lp + Vector2(0, 24), Vector2(10, 14), Color(1, 0.85, 0.4, 0.25 + 0.1 * sin(time * 3.0 + x)))
+	# Pizarra con el menú
+	var b := Rect2(o.x + 880, o.y + 52, 300, 166)
+	ci.draw_rect(b.grow(9), Color("6b4a2a"))
+	ci.draw_rect(b, Color("2c3a33"))
+	text(ci, b.position + Vector2(0, 30), "MENÚ DEL DÍA", 20, Color("f4f1e6"), HORIZONTAL_ALIGNMENT_CENTER, b.size.x)
+	for i in menu.size():
+		text(ci, b.position + Vector2(18, 62 + i * 24), "• " + str(menu[i]), 16, Color("e9f0dc"), HORIZONTAL_ALIGNMENT_LEFT, 270)
+	if "plantas" in decor:
+		hanging_plant(ci, o + Vector2(240, 14), 0.8)
+	if "ventilador" in decor:
+		ceiling_fan(ci, o + Vector2(380, 14), time)
+
+
+## Frente del mostrador japonés: listones de madera clara y una franja índigo
+static func draw_counter_japon(ci: CanvasItem, rect: Rect2, top: float) -> void:
+	var y := rect.position.y + top
+	var front := Rect2(rect.position.x, y + 18, rect.size.x, rect.end.y - y - 18)
+	ci.draw_rect(front, Color("d8b880"))
+	for x in range(0, int(front.size.x), 24):
+		ci.draw_line(Vector2(front.position.x + x, front.position.y), Vector2(front.position.x + x, front.end.y), Color("b8955a"), 3)
+	ci.draw_rect(Rect2(front.position.x, front.position.y + 26, front.size.x, 22), Color("1f3a6a"))
+	for x in range(30, int(front.size.x), 90):
+		ci.draw_arc(Vector2(front.position.x + x, front.position.y + 37), 8, PI, TAU, 10, Color("f6f0e0"), 2)
+	grad_rect(ci, Rect2(rect.position.x, y, rect.size.x, 20), Color("8a6a42"), Color("5a3a22"))
+	ci.draw_rect(Rect2(rect.position.x, y + 3, rect.size.x, 2), Color(1, 1, 1, 0.25))
 	ci.draw_rect(Rect2(rect.position.x, y + 20, rect.size.x, 6), Color(0, 0, 0, 0.3))

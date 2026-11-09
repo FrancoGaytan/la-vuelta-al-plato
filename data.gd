@@ -28,7 +28,7 @@ const TOOLS := {
 # Heladera de la cocina: los ingredientes van agrupados por tipo
 const FRIDGE_GROUPS := [
 	["Carnes", ["milanesa", "bife", "pollo", "hamburguesa", "carne_asada", "pastor", "tikka"]],
-	["Pastas, arroz y granos", ["spaghetti", "noquis", "ravioles", "fettuccine", "arroz", "frijoles", "garbanzos", "naan"]],
+	["Pastas, arroz y granos", ["spaghetti", "noquis", "ravioles", "fettuccine", "arroz", "frijoles", "garbanzos", "naan", "fideos_ramen", "yakisoba"]],
 	["Verduras", ["papas_fritas", "calabaza", "berenjena", "morron", "aros_cebolla", "champinones"]],
 	["Dulces", ["panqueque", "churros", "malteada_choco", "malteada_frutilla", "malteada_vainilla", "croissant"]],
 ]
@@ -117,8 +117,9 @@ const APPLIANCES := {
 	"licuadora": {"name": "Licuadora", "slots": 2},        # EE.UU.: malteadas (si se pasa, queda aguada)
 	"crepera": {"name": "Crepera", "slots": 2},          # Francia: la crêpe se da vuelta a mano
 	"tandoor": {"name": "Tandoor", "slots": 3},          # India: horno de barro
+	"wok": {"name": "Wok", "slots": 2},                # Japón: hay que saltearlo para que no se pegue
 }
-const APPLIANCE_ORDER := ["comal", "crepera", "olla", "plancha", "freidora", "horno", "horno_lena", "licuadora", "tandoor"]
+const APPLIANCE_ORDER := ["comal", "crepera", "olla", "plancha", "freidora", "horno", "horno_lena", "licuadora", "tandoor", "wok"]
 
 # kind: "cook" se cocina en un aparato (target = segundos ideales, burn = se quema)
 #       "chop" se corta en la tabla (cuts = cantidad de cortes)
@@ -185,6 +186,10 @@ const ITEMS := {
 	"naan": {"name": "Naan", "kind": "cook", "where": "tandoor", "target": 4.0, "burn": 8.0},
 	"tikka": {"name": "Pollo tikka", "kind": "cook", "where": "tandoor", "target": 9.0, "burn": 15.0,
 		"temps": [[0, 5], [9, 74], [15, 95]], "target_temp": 74},
+	# Japón. El maki se arma en la esterilla ("assembled"); el wok hay que saltearlo seguido ("toss")
+	"maki": {"name": "Maki", "kind": "assembled"},
+	"fideos_ramen": {"name": "Fideos de ramen", "kind": "cook", "where": "olla", "target": 4.0, "burn": 9.0},
+	"yakisoba": {"name": "Yakisoba", "kind": "cook", "where": "wok", "target": 7.0, "burn": 12.0},
 }
 
 # parts: cada parte es una lista de opciones; el cliente elige una por parte.
@@ -260,6 +265,13 @@ const RECIPES := {
 		"sauces": ["Raita", "Chutney de menta"], "toppings": ["Cebolla morada", "Limón"]},
 	"chana": {"name": "Chana masala", "cat": "Currys", "parts": [["masala"], ["garbanzos"], ["arroz", "naan"]], "spiced": true,
 		"sauces": [], "toppings": ["Cilantro", "Limón"]},
+	# Japón. "rolled": los toppings son el relleno del maki (van adentro, en la esterilla)
+	"maki": {"name": "Maki roll", "cat": "Sushi", "parts": [["maki"]], "prebuilt": true, "rolled": true, "sauces": [],
+		"toppings": ["Salmón", "Palta", "Pepino", "Queso crema", "Kanikama"], "min_toppings": 2},
+	"ramen": {"name": "Ramen", "cat": "Ramen", "parts": [["fideos_ramen"]],
+		"sauces": ["Shoyu", "Miso", "Tonkotsu"], "toppings": ["Huevo marinado", "Cebollita", "Nori", "Chashu"], "min_toppings": 1},
+	"yakisoba": {"name": "Yakisoba", "cat": "Wok", "parts": [["yakisoba"]],
+		"sauces": ["Salsa yakisoba", "Teriyaki"], "toppings": ["Sésamo", "Cebollita", "Jengibre rojo"]},
 }
 
 # Cada día suma recetas nuevas al menú y sube la dificultad.
@@ -347,6 +359,22 @@ const INDIA_LEVELS := [
 const SPICES := {"Comino": Color("8a6a3a"), "Cúrcuma": Color("f2b01d"), "Jengibre": Color("e8c88a"),
 	"Garam masala": Color("7a3a1e"), "Chile": Color("c8281a"), "Cardamomo": Color("6a8a3a")}
 
+
+# Días de Sakura Ramen (Tokio)
+const JAPAN_LEVELS := [
+	{"name": "Ichi · Barra de sushi", "new": ["maki"], "customers": 5,
+		"interval": [28.0, 34.0], "patience": 110.0, "max_toppings": 2, "show_zone": true,
+		"tip": "En la Esterilla (tecla 3): poné el alga, cubrila de arroz frotando, tocá los rellenos que pidió el cliente, enrollá deslizando hacia arriba y cortá en piezas."},
+	{"name": "Ni · Ramen y wok", "new": ["ramen", "yakisoba"], "customers": 6,
+		"interval": [26.0, 32.0], "patience": 110.0, "max_toppings": 2, "show_zone": true,
+		"tip": "El yakisoba va al wok: tocalo seguido para saltearlo. Si lo dejás quieto se pega y se quema. Los fideos de ramen se hierven sin sal: el caldo ya es salado."},
+	{"name": "San · Noche en Tokio", "new": [], "customers": 8, "drinks": true,
+		"interval": [25.0, 31.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
+]
+const SUSHI_CUTS := 6
+const ROLL_PX := 260.0         # cuánto hay que deslizar hacia arriba para enrollar
+const WOK_STICK := 3.0         # segundos sin saltear hasta que la comida se empieza a pegar
+
 # Molcajete (México): ingredientes de cada salsa y cuántas vueltas de mano hacen falta para molerla
 const MOLCAJETE := {
 	"Salsa verde": ["tomatillo", "chile", "cilantro"],
@@ -398,8 +426,10 @@ const COUNTRIES := {
 		"drinks": ["Agua", "Lassi de mango", "Chai", "Limonada"]},
 	"japon": {"name": "Japón", "city": "Tokio", "restaurant": "Sakura Ramen", "lon": 139.7, "lat": 35.7,
 		"flag": ["circulo", [Color("ffffff"), Color("bc002d")]],
-		"cuisine": "Sushi, ramen y yakisoba", "cooking": "Esterilla de sushi y wok",
-		"price": 10000, "stars_needed": 6, "ready": false, "levels": []},
+		"cuisine": "Maki rolls, ramen y yakisoba", "cooking": "Esterilla de sushi para enrollar y wok que hay que saltear",
+		"price": 10000, "stars_needed": 6, "ready": true, "levels": JAPAN_LEVELS, "prep": "esterilla",
+		"names": ["Yuki", "Haruto", "Sakura", "Kenji", "Aiko", "Takeshi", "Obaachan Hana", "Ren", "Mei", "Daichi", "Sora", "Hina"],
+		"drinks": ["Agua", "Té verde", "Cola", "Limonada"]},
 }
 const COUNTRY_ORDER := ["argentina", "italia", "mexico", "eeuu", "francia", "india", "japon"]
 
@@ -445,6 +475,7 @@ const DRINKS := {
 	"Horchata": {"color": Color("f1e8d6"), "label": Color("b07a3a"), "kind": "botella"},
 	"Lassi de mango": {"color": Color("f6b84a"), "label": Color("e8702a"), "kind": "botella"},
 	"Chai": {"color": Color("c89a6a"), "label": Color("7a3a1e"), "kind": "botella"},
+	"Té verde": {"color": Color("a8c86a"), "label": Color("3f7a28"), "kind": "botella"},
 }
 
 # Pasta fresca (Italia): se amasa a mano en la Mesa. Lo que lleva "fresh" en ITEMS no está en la heladera

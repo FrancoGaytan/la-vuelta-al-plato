@@ -17,6 +17,7 @@ const PressView = preload("res://views/tortilla_press_view.gd")
 const MolcajeteView = preload("res://views/molcajete_view.gd")
 const CrepeView = preload("res://views/crepe_view.gd")
 const PipingView = preload("res://views/piping_view.gd")
+const SushiView = preload("res://views/sushi_view.gd")
 const SinkView = preload("res://views/sink_view.gd")
 const RackView = preload("res://views/rack_view.gd")
 const TrashView = preload("res://views/trash_view.gd")
@@ -88,6 +89,7 @@ const COOK_SFX := {
 	"licuadora": ["res://assets/sfx/licuadora.wav", -20.0],
 	"crepera": ["res://assets/sfx/chisporroteo.wav", -26.0],
 	"tandoor": ["res://assets/sfx/horno.wav", -22.0],
+	"wok": ["res://assets/sfx/chisporroteo.wav", -18.0],
 }
 
 # Sonidos sueltos: archivo y volumen (dB)
@@ -178,6 +180,8 @@ var crepe_mode := "crepes"             # Francia: la Crêperie sirve para esparc
 var crepe_batter = null               # la crêpe que se está esparciendo {spread}
 var pipe = null                       # el éclair que se está decorando {flavor, pts, covered, mess}
 var masala_pan = null                  # India: el masala que se está haciendo {spices}
+var sushi_roll = null                  # Japón: el maki que se está armando {stage, rice, fillings, rolled, cuts}
+var sushi_view = null
 var critic_at := -1                  # qué cliente del día es el crítico de la guía (-1 = hoy no viene)
 var critic_score := -1.0             # nota que le dio al plato (-1 = todavía no comió)
 var critic_name := ""
@@ -766,6 +770,12 @@ func _process(delta: float) -> void:
 				continue
 			var before: float = _doneness_progress(slot)
 			slot["t"] += delta / Data.COOK_SLOW     # la cocción avanza más lento que el reloj
+			if a == "wok":
+				# Wok: si no se saltea, se pega y se quema el doble de rápido
+				slot["stick"] = float(slot.get("stick", 0.0)) + delta
+				if slot["stick"] > Data.WOK_STICK:
+					slot["t"] += delta / Data.COOK_SLOW
+					slot["stuck"] = float(slot.get("stuck", 0.0)) + delta
 			if slot.has("ta"):
 				if slot.get("flip", false):
 					# Tortilla en el comal: se cocina el lado de abajo; el de arriba apenas se entibia
@@ -1382,6 +1392,7 @@ func _show_intro(i: int) -> void:
 		"armado": step3 = "3. Armado: apilá la hamburguesa capa por capa en el orden exacto del ticket.\n"
 		"creperie": step3 = "3. Crêperie: esparcí la masa de crêpe en círculos y mandala a la crepera; con la manga se decoran los éclairs.\n"
 		"especiero": step3 = "3. Especiero: agregá las especias de la masala dabba en el orden exacto del ticket.\n"
+		"esterilla": step3 = "3. Esterilla: alga, arroz frotando, el relleno pedido, enrollá deslizando hacia arriba y cortá.\n"
 	if i == 0:
 		tip = "Cómo se juega:\n1. Pedidos: tomá el pedido del cliente del mostrador.\n" + \
 			"2. Cocina: arrastrá los ingredientes de la heladera al aparato y sacalos en su punto (click). Las carnes tienen termómetro. Lo de la plancha y la olla se sala con el salero.\n" + \
@@ -1449,6 +1460,7 @@ func _start_level(i: int) -> void:
 	crepe_batter = null
 	pipe = null
 	masala_pan = null
+	sushi_roll = null
 	mesa_pizza = null
 	# ¿Viene hoy el crítico de la guía? Llega mezclado entre los clientes (nunca primero ni último)
 	critic_at = -1
@@ -1900,6 +1912,7 @@ func _take_off(appliance: String, idx: int) -> void:
 		label = "%s quemado" % Data.ITEMS[slot["item"]]["name"]
 	prepared.append({"item": slot["item"], "t": t, "vtarget": slot["target"], "burn": slot["burn"],
 		"label": label, "pantry": false, "chopped": false, "salt": slot.get("salt", 0.0),
+		"stuck": slot.get("stuck", 0.0),
 		"dirty": slot.get("dirty_tool", false)})
 	_refresh_all()
 
@@ -2380,6 +2393,7 @@ func _deliver() -> void:
 				elif e.get("t", -1.0) >= 0.0:
 					q = _cook_quality(e["t"], _target_for(o, e["item"]), e["burn"])
 					q *= Data.salt_factor(e["item"], e.get("salt", 0.0))   # bien salado (o sin sal si no lleva)
+					q *= maxf(0.4, 1.0 - float(e.get("stuck", 0.0)) * 0.12)   # wok sin saltear: se pegó
 				if e.get("dirty", false):
 					q *= Data.DIRTY_FOOD     # se cocinó con un utensilio sucio
 				qualities.append(q)
@@ -2403,6 +2417,9 @@ func _deliver() -> void:
 			if e.get("item", "") == "pizza":
 				plate_sauce = e["pizza"].get("sauce", "")
 				put = e["pizza"].get("plate_toppings", [])
+				break
+			if e.has("fillings"):
+				put = e["fillings"]       # maki: el relleno que se puso en la esterilla
 				break
 			if e.has("piped"):
 				plate_sauce = e["piped"]      # el sabor del glaseado
@@ -2446,6 +2463,9 @@ func _deliver() -> void:
 	var total := s_items * 0.3 + s_cook * 0.3 + s_sauce * 0.1 + s_tops * 0.1 + s_wait * 0.2
 	if o.has("layers"):
 		# Hamburguesa por capas: el armado en orden pesa como la cocción (no lleva salsa aparte)
+		total = s_items * 0.25 + s_cook * 0.25 + s_tops * 0.3 + s_wait * 0.2
+	if Data.RECIPES[o["recipe"]].get("rolled", false):
+		# Maki: el relleno pedido pesa como la cocción
 		total = s_items * 0.25 + s_cook * 0.25 + s_tops * 0.3 + s_wait * 0.2
 	if o.has("spices"):
 		# Curry: el orden de las especias pesa casi como la cocción
@@ -2775,6 +2795,7 @@ func _refresh_station() -> void:
 	pasta_view = null
 	press_view = null
 	molcajete_view = null
+	sushi_view = null
 	sink_view = null
 	rack_view = null
 	plating_plate = null
@@ -3200,6 +3221,7 @@ func _prep_name() -> String:
 		"armado": return "Armado"
 		"creperie": return "Crêperie"
 		"especiero": return "Especiero"
+		"esterilla": return "Esterilla"
 	return "Tabla"
 
 
@@ -3210,6 +3232,7 @@ func _build_prep_station() -> void:
 		"armado": _build_armado_station()
 		"creperie": _build_creperie_station()
 		"especiero": _build_especiero_station()
+		"esterilla": _build_esterilla_station()
 		_: _build_board_station()
 
 
@@ -3300,6 +3323,158 @@ func _build_mesa_station() -> void:
 	oven.custom_minimum_size = Vector2(280, 54)
 	oven.disabled = mesa_pizza == null or mesa_pizza["stretch"] < 1.0
 	station_box.add_child(oven)
+
+
+# --- 3 (Japón). Esterilla: maki roll ---
+
+func _build_esterilla_station() -> void:
+	var draw_bg := func(ci, _t): Art.draw_wood_counter(ci, Rect2(Vector2.ZERO, STATION_SIZE))
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
+	var o = _get_order(selected_id)
+	_tag("Esterilla  ·  alga, arroz, el relleno pedido, enrollar y cortar", Vector2(12, 4), 15)
+	var nori := _prop(Rect2(16, 40, 130, 100))
+	nori.draw_fn = func(ci, r): Art.draw_nori_stack(ci, r)
+	nori.text = "Alga nori"
+	nori.text_size = 13
+	nori.drag_data = {"kind": "nori"}
+	nori.tooltip_text = "Arrastrala a la esterilla (o tocala)"
+	nori.pressed.connect(_sushi_drop.bind({"kind": "nori"}))
+	# Rellenos: se tocan cuando el arroz ya está
+	var fills := _cat_options("Sushi", "toppings")
+	var have: Array = sushi_roll["fillings"] if sushi_roll != null else []
+	for k in fills.size():
+		var fname: String = fills[k]
+		var b := _prop(Rect2(16 + (k % 2) * 92, 150 + (k / 2) * 92, 88, 88))
+		b.draw_fn = func(ci, rr): Art.draw_bowl(ci, rr, fname)
+		b.text = fname
+		b.text_size = 11
+		b.selected = fname in have
+		b.tooltip_text = "Relleno: %s (tocalo para ponerlo o sacarlo)" % fname.to_lower()
+		b.pressed.connect(_sushi_filling.bind(fname))
+	sushi_view = SushiView.new()
+	sushi_view.position = Vector2(200, 36)
+	sushi_view.size = Vector2(620, 428)
+	sushi_view.roll = sushi_roll
+	sushi_view.need_cuts = Data.SUSHI_CUTS
+	sushi_view.dropped.connect(_sushi_drop)
+	sushi_view.rice.connect(_sushi_rice)
+	sushi_view.rolling.connect(_sushi_rolling)
+	sushi_view.tapped.connect(_sushi_tap)
+	station_box.add_child(sushi_view)
+	var go := _button("¡Enrollar!", _sushi_start_roll, 20)
+	go.position = Vector2(860, 50)
+	go.custom_minimum_size = Vector2(200, 50)
+	go.disabled = sushi_roll == null or int(sushi_roll["stage"]) != 2
+	station_box.add_child(go)
+	var drop := _button("Tirar", _sushi_discard, 14)
+	drop.position = Vector2(1080, 60)
+	drop.disabled = sushi_roll == null
+	station_box.add_child(drop)
+	# Lo que pidió el cliente
+	var want: Array = o["toppings"] if o != null and Data.RECIPES[o["recipe"]].get("rolled", false) else []
+	var title := "Elegí un ticket de maki" if want.is_empty() else "#%d %s pidió:" % [o["id"], o["name"]]
+	var draw_want := func(ci, _t):
+		Art.draw_paper(ci, Rect2(0, 0, 400, 330))
+		Art.text(ci, Vector2(20, 40), title, 17, COL_INK)
+		for k in want.size():
+			Art.draw_bowl(ci, Rect2(24, 60 + k * 64, 56, 56), want[k])
+			Art.text(ci, Vector2(96, 96 + k * 64), want[k], 19, COL_INK)
+			if want[k] in have:
+				Art.text(ci, Vector2(280, 96 + k * 64), "listo", 16, Color("2f7a3a"))
+	_painter(Rect2(850, 120, 400, 330), draw_want, false)
+
+
+func _sushi_drop(data: Dictionary) -> void:
+	if data.get("kind", "") != "nori":
+		return
+	if sushi_roll != null:
+		_hint("Ya hay un maki en la esterilla")
+		return
+	var cells := []
+	cells.resize(SushiView.COLS * SushiView.ROWS)
+	cells.fill(false)
+	sushi_roll = {"stage": 1, "rice": cells, "fillings": [], "rolled": 0.0, "cuts": 0}
+	_refresh_station()
+
+
+func _sushi_rice() -> void:
+	if sushi_roll == null or int(sushi_roll["stage"]) != 1:
+		return
+	if knead_sound_t <= 0.0:
+		_play_sfx("frotar", -12.0)
+		knead_sound_t = 0.3
+	var cells: Array = sushi_roll["rice"]
+	if cells.filter(func(x): return x).size() >= int(cells.size() * 0.9):
+		for k in cells.size():
+			cells[k] = true
+		sushi_roll["stage"] = 2
+		_hint("¡Arroz listo! Ahora el relleno que pidió")
+		_refresh_station()
+
+
+func _sushi_filling(fname: String) -> void:
+	if sushi_roll == null or int(sushi_roll["stage"]) != 2:
+		_hint("Primero el alga y el arroz" if sushi_roll == null or int(sushi_roll["stage"]) < 2 else "El maki ya está enrollado")
+		return
+	var f: Array = sushi_roll["fillings"]
+	if fname in f:
+		f.erase(fname)
+	elif f.size() >= 4:
+		_hint("No entra más relleno")
+		return
+	else:
+		f.append(fname)
+	_refresh_station()
+
+
+func _sushi_start_roll() -> void:
+	if sushi_roll == null or int(sushi_roll["stage"]) != 2:
+		return
+	if sushi_roll["fillings"].is_empty():
+		_hint("Le falta el relleno")
+		return
+	sushi_roll["stage"] = 3
+	_hint("Deslizá hacia arriba para enrollar")
+	_refresh_station()
+
+
+func _sushi_rolling(dy: float) -> void:
+	if sushi_roll == null or int(sushi_roll["stage"]) != 3:
+		return
+	sushi_roll["rolled"] = minf(1.0, float(sushi_roll["rolled"]) + dy / Data.ROLL_PX)
+	if sushi_roll["rolled"] >= 1.0:
+		sushi_roll["stage"] = 4
+		_hint("¡Enrollado! Cortalo en piezas")
+		_refresh_station()
+
+
+func _sushi_tap() -> void:
+	if sushi_roll == null:
+		_hint("Arrastrá una hoja de alga a la esterilla")
+		return
+	match int(sushi_roll["stage"]):
+		2:
+			_hint("Tocá los rellenos de la izquierda y después ¡Enrollar!")
+		4:
+			sushi_roll["cuts"] = int(sushi_roll["cuts"]) + 1
+			_play_sfx("corte%d" % (rng.randi() % 3 + 1), -4.0)
+			if sushi_view != null and is_instance_valid(sushi_view):
+				sushi_view.bump()
+			if int(sushi_roll["cuts"]) >= Data.SUSHI_CUTS:
+				var f: Array = sushi_roll["fillings"]
+				prepared.append({"item": "maki", "t": -1.0, "fillings": f.duplicate(), "pantry": false, "chopped": false,
+					"label": "Maki (%s)" % ", ".join(PackedStringArray(f)).to_lower()})
+				sushi_roll = null
+				_hint("¡Maki listo! Está en la bandeja del Emplatado")
+				_refresh_all()
+
+
+func _sushi_discard() -> void:
+	if sushi_roll == null:
+		return
+	sushi_roll = null
+	money -= Data.WASTE_COST["chop"]
+	_refresh_station()
 
 
 # --- 3 (India). Especiero: el masala con las especias en el orden del ticket ---
