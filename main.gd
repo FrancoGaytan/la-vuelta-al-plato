@@ -15,6 +15,8 @@ const MesaView = preload("res://views/pizza_mesa_view.gd")
 const PastaView = preload("res://views/pasta_board_view.gd")
 const PressView = preload("res://views/tortilla_press_view.gd")
 const MolcajeteView = preload("res://views/molcajete_view.gd")
+const CrepeView = preload("res://views/crepe_view.gd")
+const PipingView = preload("res://views/piping_view.gd")
 const SinkView = preload("res://views/sink_view.gd")
 const RackView = preload("res://views/rack_view.gd")
 const TrashView = preload("res://views/trash_view.gd")
@@ -84,6 +86,7 @@ const COOK_SFX := {
 	"horno": ["res://assets/sfx/horno.wav", -21.0],
 	"comal": ["res://assets/sfx/chisporroteo.wav", -24.0],     # la tortilla chisporrotea apenas
 	"licuadora": ["res://assets/sfx/licuadora.wav", -20.0],
+	"crepera": ["res://assets/sfx/chisporroteo.wav", -26.0],
 }
 
 # Sonidos sueltos: archivo y volumen (dB)
@@ -170,6 +173,9 @@ var molcajete = null                  # lo que se está moliendo {sauce, ground,
 var molcajete_view = null
 var salsa_stock := {}                 # porciones de cada salsa molida
 var burger_stack = null               # EE.UU.: la hamburguesa que se está armando {layers, patty}
+var crepe_mode := "crepes"             # Francia: la Crêperie sirve para esparcir crêpes o para la manga
+var crepe_batter = null               # la crêpe que se está esparciendo {spread}
+var pipe = null                       # el éclair que se está decorando {flavor, pts, covered, mess}
 var critic_at := -1                  # qué cliente del día es el crítico de la guía (-1 = hoy no viene)
 var critic_score := -1.0             # nota que le dio al plato (-1 = todavía no comió)
 var critic_name := ""
@@ -1371,6 +1377,8 @@ func _show_intro(i: int) -> void:
 	match _prep():
 		"mesa": step3 = "3. Mesa: estirá la masa de pizza, poné salsa e ingredientes y mandala al horno de leña.\n"
 		"tortilleria": step3 = "3. Tortillería: prensá las tortillas y mandalas al comal; en el molcajete se muelen las salsas.\n"
+		"armado": step3 = "3. Armado: apilá la hamburguesa capa por capa en el orden exacto del ticket.\n"
+		"creperie": step3 = "3. Crêperie: esparcí la masa de crêpe en círculos y mandala a la crepera; con la manga se decoran los éclairs.\n"
 	if i == 0:
 		tip = "Cómo se juega:\n1. Pedidos: tomá el pedido del cliente del mostrador.\n" + \
 			"2. Cocina: arrastrá los ingredientes de la heladera al aparato y sacalos en su punto (click). Las carnes tienen termómetro. Lo de la plancha y la olla se sala con el salero.\n" + \
@@ -1434,6 +1442,9 @@ func _start_level(i: int) -> void:
 	molcajete = null
 	salsa_stock = {}
 	burger_stack = null
+	crepe_mode = "crepes"
+	crepe_batter = null
+	pipe = null
 	mesa_pizza = null
 	# ¿Viene hoy el crítico de la guía? Llega mezclado entre los clientes (nunca primero ni último)
 	critic_at = -1
@@ -1855,10 +1866,11 @@ func _take_off(appliance: String, idx: int) -> void:
 		# Tortilla: se lleva la cocción de cada lado
 		var burnt_t: bool = maxf(slot["ta"], slot["tb"]) >= slot["burn"]
 		var raw_t: bool = minf(slot["ta"], slot["tb"]) < slot["target"] * 0.6
+		var fname: String = Data.ITEMS[slot["item"]]["name"]
 		prepared.append({"item": slot["item"], "t": maxf(slot["ta"], slot["tb"]), "ta": slot["ta"], "tb": slot["tb"],
 			"vtarget": slot["target"], "burn": slot["burn"], "pantry": false, "chopped": false,
 			"dirty": slot.get("dirty_tool", false),
-			"label": "Tortilla quemada" if burnt_t else ("Tortilla cruda de un lado" if raw_t else "Tortilla")})
+			"label": (fname + " quemada") if burnt_t else ((fname + " cruda de un lado") if raw_t else fname)})
 		_refresh_all()
 		return
 	if slot.has("ta"):
@@ -2347,6 +2359,8 @@ func _deliver() -> void:
 					q = _pizza_quality(e, _target_for(o, e["item"]))
 					if e.has("pizza") and e["pizza"].get("stretch", 0.0) < 1.0:
 						q *= 0.5      # la masa no estaba bien estirada
+				elif e.has("pipe_q"):
+					q = e["pipe_q"]       # éclair: qué tan bien se siguió la guía con la manga
 				elif e.has("patty_t"):
 					# Hamburguesa armada: se juzga el medallón (punto y sal)
 					q = _cook_quality(e["patty_t"], _target_for(o, e["item"]), e["burn"])
@@ -2377,6 +2391,9 @@ func _deliver() -> void:
 			if e.get("item", "") == "pizza":
 				plate_sauce = e["pizza"].get("sauce", "")
 				put = e["pizza"].get("plate_toppings", [])
+				break
+			if e.has("piped"):
+				plate_sauce = e["piped"]      # el sabor del glaseado
 				break
 			if e.has("layers"):
 				# Hamburguesa: los ingredientes son las capas que se apilaron en el Armado
@@ -2901,9 +2918,12 @@ func _build_kitchen_station() -> void:
 
 	# Abajo de los aparatos: la receta del ticket elegido
 	var top := 36.0 + 330.0 * k + 6.0
-	_build_order_recipe(o, Rect2(12, top, x - 110.0, STATION_SIZE.y - top - 4.0))
+	var fridge_items := cook_items.filter(func(id): return not Data.ITEMS[id].get("built", false))   # la pizza se arma en la mesa
+	var n := fridge_items.size()
+	var rw := x - 110.0 if n > 0 else 640.0     # sin heladera, la receta tiene más lugar
+	_build_order_recipe(o, Rect2(12, top, rw, STATION_SIZE.y - top - 4.0))
 	# Salero: se mantiene apretado y se sacude encima de la plancha o la olla
-	var shaker := _prop(Rect2(x - 94.0, top, 84.0, STATION_SIZE.y - top - 4.0))
+	var shaker := _prop(Rect2(12.0 + rw + 16.0, top, 84.0, STATION_SIZE.y - top - 4.0))
 	shaker.draw_fn = func(ci, r): Art.salt_shaker(ci, r.get_center() + Vector2(0, 4), minf(r.size.y / 50.0, 1.6), -0.2, false, 0.0)
 	shaker.text = "Salero"
 	shaker.text_size = 12
@@ -2914,8 +2934,6 @@ func _build_kitchen_station() -> void:
 	# Heladera con los ingredientes crudos: se arrastran hasta el aparato que corresponde
 	var fx := x + 4.0
 	var fw := STATION_SIZE.x - fx - 10.0
-	var fridge_items := cook_items.filter(func(id): return not Data.ITEMS[id].get("built", false))   # la pizza se arma en la mesa
-	var n := fridge_items.size()
 	# Agrupados por tipo: carnes con carnes, pastas con pastas, verduras con verduras (un estante cada uno)
 	var groups := []
 	var placed := []
@@ -2948,10 +2966,17 @@ func _build_kitchen_station() -> void:
 			Art.rrect(ci, Rect2(14, s[0] + 1, fw - 28, head_h - 3), Color(0.78, 0.84, 0.88, 0.6), 4)
 			Art.text(ci, Vector2(20, s[0] + 13), s[1].to_upper(), 11, Color("4a5560"))
 			ci.draw_rect(Rect2(8, s[2] - 4, fw - 16, 4), Color("c5ccd2"))
-	_painter(Rect2(fx, 30, fw, 430), draw_fridge, false)
-	if n == 0 and _uses_mesa():
-		var note := _label("Hoy en la cocina solo va el horno de leña.\n\nLa pizza se arma en la Mesa (tecla 3):\nestirás la masa, ponés salsa e ingredientes\ny la mandás al horno.", 18, Color(0.3, 0.32, 0.36))
-		note.position = Vector2(fx + 30, 150)
+	if n > 0:
+		_painter(Rect2(fx, 30, fw, 430), draw_fridge, false)
+	else:
+		# Sin nada de la heladera: se explica de dónde sale lo que va acá
+		var msg := "Hoy no hace falta la heladera."
+		match _prep():
+			"mesa": msg = "Hoy en la cocina solo va el horno de leña.\n\nLa pizza se arma en la Mesa (tecla 3):\nestirás la masa, ponés salsa e ingredientes\ny la mandás al horno."
+			"creperie": msg = "Hoy en la cocina solo va la crepera.\n\nLa masa se esparce en la Crêperie (tecla 3)\ny acá se da vuelta: tocá la crêpe cuando\nse dore abajo, y sacala con los dos lados listos."
+			"tortilleria": msg = "Las tortillas se prensan en la Tortillería (tecla 3)\ny acá, en el comal, se dan vuelta."
+		var note := _label(msg, 18, Color.WHITE, 5)
+		note.position = Vector2(fx + 40, 80)
 		station_box.add_child(note)
 	for gi in groups.size():
 		var ids: Array = groups[gi][1]
@@ -3081,7 +3106,7 @@ func _recipe_step(n: int, o, entry: Dictionary, compact: bool) -> Control:
 			if id == "pizza":
 				where = "Mesa: estirar y armar · Horno de leña: girala"
 			if info.get("flip", false):
-				where = "Prensa y comal: dala vuelta"
+				where = "%s y %s: dala vuelta" % [_prep_name(), where.to_lower()]
 			if info.has("temps"):
 				var temp: int = info.get("target_temp", 0)
 				if entry["doneness"] != "":
@@ -3151,6 +3176,7 @@ func _prep_name() -> String:
 		"mesa": return "Mesa"
 		"tortilleria": return "Tortillería"
 		"armado": return "Armado"
+		"creperie": return "Crêperie"
 	return "Tabla"
 
 
@@ -3159,6 +3185,7 @@ func _build_prep_station() -> void:
 		"mesa": _build_mesa_station()
 		"tortilleria": _build_tortilleria_station()
 		"armado": _build_armado_station()
+		"creperie": _build_creperie_station()
 		_: _build_board_station()
 
 
@@ -3249,6 +3276,197 @@ func _build_mesa_station() -> void:
 	oven.custom_minimum_size = Vector2(280, 54)
 	oven.disabled = mesa_pizza == null or mesa_pizza["stretch"] < 1.0
 	station_box.add_child(oven)
+
+
+# --- 3 (Francia). Crêperie: esparcir crêpes y decorar éclairs con la manga ---
+
+func _set_crepe_mode(m: String) -> void:
+	crepe_mode = m
+	_refresh_station()
+
+
+func _build_creperie_station() -> void:
+	var draw_bg := func(ci, _t): Art.draw_wood_counter(ci, Rect2(Vector2.ZERO, STATION_SIZE))
+	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
+	var has_eclair := "eclair" in _unlocked_items("assembled")
+	if has_eclair:
+		var modes := HBoxContainer.new()
+		modes.position = Vector2(STATION_SIZE.x - 330, 2)
+		modes.add_theme_constant_override("separation", 6)
+		station_box.add_child(modes)
+		for m in [["crepes", "Crêpes"], ["manga", "Manga · éclairs"]]:
+			var mb := _button(m[1], _set_crepe_mode.bind(m[0]), 14)
+			mb.custom_minimum_size = Vector2(150, 30)
+			if crepe_mode == m[0]:
+				mb.add_theme_stylebox_override("normal", _sb(COL_SELECTED, Color("8a5a2b")))
+			modes.add_child(mb)
+		if crepe_mode == "manga":
+			_build_piping()
+			return
+	_tag("Crêpes  ·  cucharón de masa a la crêpière, esparcila en círculos con el rastrillo y a la crepera", Vector2(12, 4), 15)
+	var bowl := _prop(Rect2(20, 70, 160, 150))
+	bowl.draw_fn = func(ci, r): Art.draw_batter_bowl(ci, r)
+	bowl.text = "Masa de crêpes"
+	bowl.text_size = 14
+	bowl.drag_data = {"kind": "batter"}
+	bowl.tooltip_text = "Arrastrá el cucharón a la crêpière (o tocalo)"
+	bowl.pressed.connect(_crepe_drop.bind({"kind": "batter"}))
+	if crepe_batter != null:
+		var drop := _button("Tirar la masa", _crepe_discard, 14)
+		drop.position = Vector2(40, 250)
+		station_box.add_child(drop)
+	var cv := CrepeView.new()
+	cv.position = Vector2(220, 36)
+	cv.size = Vector2(560, 428)
+	cv.crepe = crepe_batter
+	cv.dropped.connect(_crepe_drop)
+	cv.spread.connect(_crepe_spread)
+	cv.tapped.connect(_crepe_tap)
+	station_box.add_child(cv)
+	var go := _button("¡A la crepera!", _crepe_to_pan, 22)
+	go.position = Vector2(880, 120)
+	go.custom_minimum_size = Vector2(260, 60)
+	go.disabled = crepe_batter == null or float(crepe_batter["spread"]) < 1.0
+	station_box.add_child(go)
+	var used := 0
+	for s in cookers.get("crepera", []):
+		if s != null:
+			used += 1
+	var n_slots: int = cookers.get("crepera", []).size()
+	var info := func(ci, _t):
+		Art.rrect(ci, Rect2(0, 0, 340, 150), Color(0, 0, 0, 0.35), 12)
+		Art.text(ci, Vector2(0, 34), "Crepera: %d de %d lugares ocupados" % [used, n_slots], 17, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 340, 4)
+		Art.text(ci, Vector2(16, 70), "En la Cocina: tocá la crêpe para darla", 15, Color(1, 1, 1, 0.85))
+		Art.text(ci, Vector2(16, 94), "vuelta cuando se dore abajo, y tocá el", 15, Color(1, 1, 1, 0.85))
+		Art.text(ci, Vector2(16, 118), "cartelito para sacarla con los dos lados.", 15, Color(1, 1, 1, 0.85))
+	_painter(Rect2(840, 210, 340, 150), info, false)
+
+
+func _crepe_drop(data: Dictionary) -> void:
+	if data.get("kind", "") != "batter":
+		return
+	if crepe_batter != null:
+		_hint("Ya hay masa en la crêpière")
+		return
+	crepe_batter = {"spread": 0.0}
+	_play_sfx("chapoteo", -10.0)
+	_refresh_station()
+
+
+func _crepe_spread(turns: float) -> void:
+	if crepe_batter == null or float(crepe_batter["spread"]) >= 1.0:
+		return
+	crepe_batter["spread"] = minf(1.0, float(crepe_batter["spread"]) + turns / Data.CREPE_SPREAD_TURNS)
+	if knead_sound_t <= 0.0:
+		_play_sfx("frotar", -12.0)
+		knead_sound_t = 0.35
+	if crepe_batter["spread"] >= 1.0:
+		_hint("¡Bien finita! Mandala a la crepera")
+		_refresh_station()
+
+
+func _crepe_tap() -> void:
+	if crepe_batter == null:
+		_hint("Arrastrá el cucharón con masa a la crêpière")
+	elif float(crepe_batter["spread"]) >= 1.0:
+		_crepe_to_pan()
+
+
+func _crepe_to_pan() -> void:
+	if crepe_batter == null or float(crepe_batter["spread"]) < 1.0:
+		return
+	var slots: Array = cookers["crepera"]
+	var idx := slots.find(null)
+	if idx == -1:
+		_hint("La crepera está llena: sacá alguna crêpe en la Cocina")
+		return
+	var info: Dictionary = Data.ITEMS["crepe"]
+	slots[idx] = {"item": "crepe", "t": 0.0, "ta": 0.0, "tb": 0.0, "target": info["target"], "burn": info["burn"], "flip": true}
+	crepe_batter = null
+	_hint("¡A la crepera! Dala vuelta cuando se dore")
+	_refresh_all()
+
+
+func _crepe_discard() -> void:
+	if crepe_batter == null:
+		return
+	crepe_batter = null
+	money -= Data.WASTE_COST["chop"]
+	_hint("Tiraste la masa: -$%d de la caja" % Data.WASTE_COST["chop"])
+	_refresh_station()
+
+
+func _build_piping() -> void:
+	var o = _get_order(selected_id)
+	var head := "Manga  ·  elegí el sabor y seguí la línea punteada sobre el éclair manteniendo apretado"
+	if o != null and o["recipe"] == "eclair":
+		head = "Ticket #%d %s: éclair de %s" % [o["id"], o["name"], o["sauce"].to_lower()]
+	_tag(head, Vector2(12, 4), 15)
+	var flavors: Array = Data.PIPE_FLAVORS.keys()
+	for k in flavors.size():
+		var fl: String = flavors[k]
+		var col: Color = Data.PIPE_FLAVORS[fl]
+		var b := _prop(Rect2(16, 44 + k * 132, 170, 126))
+		b.draw_fn = func(ci, r): Art.draw_piping_bag(ci, r, col)
+		b.text = fl
+		b.text_size = 15
+		b.selected = pipe != null and pipe["flavor"] == fl
+		b.tooltip_text = "Manga de %s" % fl.to_lower()
+		b.pressed.connect(_pipe_start.bind(fl))
+	var pv := PipingView.new()
+	pv.position = Vector2(200, 40)
+	pv.size = Vector2(760, 420)
+	pv.pipe = pipe
+	if pipe != null:
+		pv.color = Data.PIPE_FLAVORS[pipe["flavor"]]
+	station_box.add_child(pv)
+	var done := _button("¡Éclair listo!", _pipe_finish, 20)
+	done.position = Vector2(990, 160)
+	done.custom_minimum_size = Vector2(250, 56)
+	done.disabled = pipe == null
+	station_box.add_child(done)
+	var again := _button("Empezar de nuevo", _pipe_discard, 15)
+	again.position = Vector2(1020, 240)
+	again.disabled = pipe == null
+	station_box.add_child(again)
+
+
+func _pipe_start(fl: String) -> void:
+	if pipe != null and not pipe["pts"].is_empty() and pipe["flavor"] != fl:
+		_hint("Ya empezaste con %s: terminalo o empezá de nuevo" % pipe["flavor"].to_lower())
+		return
+	var cov := []
+	cov.resize(41)
+	cov.fill(false)
+	pipe = {"flavor": fl, "pts": [], "covered": cov, "mess": 0.0}
+	_refresh_station()
+
+
+## Nota del éclair: cuánto de la guía se cubrió, menos lo que se ensució afuera
+func _pipe_score(p: Dictionary) -> float:
+	var cov: Array = p["covered"]
+	var n := cov.filter(func(x): return x).size()
+	return clampf(100.0 * n / cov.size() * 1.1 - float(p["mess"]) * 0.8, 0.0, 100.0)
+
+
+func _pipe_finish() -> void:
+	if pipe == null or pipe["pts"].is_empty():
+		return
+	var q := _pipe_score(pipe)
+	prepared.append({"item": "eclair", "t": -1.0, "piped": pipe["flavor"], "pipe_q": q, "pantry": false, "chopped": false,
+		"label": "Éclair de %s" % pipe["flavor"].to_lower()})
+	pipe = null
+	_play_sfx("plato", -6.0)
+	_hint("¡Éclair decorado (%d%%)! Está en la bandeja del Emplatado" % int(q))
+	_refresh_all()
+
+
+func _pipe_discard() -> void:
+	if pipe == null:
+		return
+	pipe = null
+	money -= Data.WASTE_COST["chop"]
+	_refresh_station()
 
 
 # --- 3 (EE.UU.). Armado: la hamburguesa capa por capa, en el orden del ticket ---

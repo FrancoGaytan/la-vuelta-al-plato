@@ -29,8 +29,8 @@ const TOOLS := {
 const FRIDGE_GROUPS := [
 	["Carnes", ["milanesa", "bife", "pollo", "hamburguesa", "carne_asada", "pastor"]],
 	["Pastas, arroz y granos", ["spaghetti", "noquis", "ravioles", "fettuccine", "arroz", "frijoles"]],
-	["Verduras", ["papas_fritas", "calabaza", "berenjena", "morron", "aros_cebolla"]],
-	["Dulces", ["panqueque", "churros", "malteada_choco", "malteada_frutilla", "malteada_vainilla"]],
+	["Verduras", ["papas_fritas", "calabaza", "berenjena", "morron", "aros_cebolla", "champinones"]],
+	["Dulces", ["panqueque", "churros", "malteada_choco", "malteada_frutilla", "malteada_vainilla", "croissant"]],
 ]
 const TOOL_ORDER := ["plato", "olla", "espatula", "canasto", "bandeja", "pala", "tabla"]
 const TOOL_FOR := {"olla": "olla", "plancha": "espatula", "freidora": "canasto", "horno": "bandeja", "horno_lena": "pala"}   # el comal se maneja con la mano: no ensucia utensilios
@@ -115,8 +115,9 @@ const APPLIANCES := {
 	"horno_lena": {"name": "Horno de leña", "slots": 3},   # Italia: la pizza se gira con la pala
 	"comal": {"name": "Comal", "slots": 4},             # México: las tortillas se dan vuelta a mano
 	"licuadora": {"name": "Licuadora", "slots": 2},        # EE.UU.: malteadas (si se pasa, queda aguada)
+	"crepera": {"name": "Crepera", "slots": 2},          # Francia: la crêpe se da vuelta a mano
 }
-const APPLIANCE_ORDER := ["comal", "olla", "plancha", "freidora", "horno", "horno_lena", "licuadora"]
+const APPLIANCE_ORDER := ["comal", "crepera", "olla", "plancha", "freidora", "horno", "horno_lena", "licuadora"]
 
 # kind: "cook" se cocina en un aparato (target = segundos ideales, burn = se quema)
 #       "chop" se corta en la tabla (cuts = cantidad de cortes)
@@ -170,6 +171,13 @@ const ITEMS := {
 	"malteada_choco": {"name": "Malteada de chocolate", "kind": "cook", "where": "licuadora", "target": 5.0, "burn": 10.0},
 	"malteada_frutilla": {"name": "Malteada de frutilla", "kind": "cook", "where": "licuadora", "target": 5.0, "burn": 10.0},
 	"malteada_vainilla": {"name": "Malteada de vainilla", "kind": "cook", "where": "licuadora", "target": 5.0, "burn": 10.0},
+	# Francia. La crêpe se esparce en la Crêperie ("built") y en la crepera se da vuelta ("flip").
+	# El éclair se decora con la manga ("piped"): vale según cuánto se siguió la guía.
+	"crepe": {"name": "Crêpe", "kind": "cook", "where": "crepera", "target": 3.0, "burn": 6.0, "built": true, "flip": true},
+	"champinones": {"name": "Champiñones", "kind": "cook", "where": "plancha", "salt": true, "target": 6.0, "burn": 11.0},
+	"jamon": {"name": "Jamón", "kind": "ready"},
+	"croissant": {"name": "Croissant", "kind": "cook", "where": "horno", "target": 9.0, "burn": 15.0},
+	"eclair": {"name": "Éclair", "kind": "assembled"},
 }
 
 # parts: cada parte es una lista de opciones; el cliente elige una por parte.
@@ -229,6 +237,15 @@ const RECIPES := {
 		"sauces": ["Miel de maple", "Sin salsa"], "toppings": ["Manteca", "Frutillas", "Arándanos"], "min_toppings": 1},
 	"malteada": {"name": "Malteada", "cat": "Malteadas", "parts": [["malteada_choco", "malteada_frutilla", "malteada_vainilla"]],
 		"sauces": [], "toppings": ["Crema", "Cereza"], "min_toppings": 1},
+	# Francia
+	"crepe_dulce": {"name": "Crêpe dulce", "cat": "Crêpes dulces", "parts": [["crepe"]],
+		"sauces": ["Choco-avellanas", "Caramelo", "Limón y azúcar"], "toppings": ["Frutillas", "Banana", "Azúcar"]},
+	"crepe_salada": {"name": "Crêpe salada", "cat": "Crêpes saladas", "parts": [["crepe"], ["jamon", "champinones"]],
+		"sauces": ["Bechamel", "Sin salsa"], "toppings": ["Queso gruyère", "Ciboulette"]},
+	"croissant": {"name": "Croissant", "cat": "Boulangerie", "parts": [["croissant"]], "sauces": [],
+		"toppings": ["Manteca", "Mermelada"], "min_toppings": 1},
+	"eclair": {"name": "Éclair", "cat": "Pâtisserie", "parts": [["eclair"]], "prebuilt": true, "piped": true,
+		"sauces": ["Chocolate", "Café", "Frutilla"], "toppings": []},
 }
 
 # Cada día suma recetas nuevas al menú y sube la dificultad.
@@ -286,6 +303,21 @@ const US_LEVELS := [
 		"interval": [25.0, 31.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
 ]
 
+
+# Días de Le Petit Crêpier (París)
+const FRANCE_LEVELS := [
+	{"name": "Jour 1 · La crêperie", "new": ["crepe_dulce"], "customers": 5,
+		"interval": [28.0, 34.0], "patience": 110.0, "max_toppings": 2, "show_zone": true,
+		"tip": "En la Crêperie (tecla 3): arrastrá el cucharón con masa a la crêpière y esparcila haciendo círculos con el rastrillo hasta cubrir todo. Después va a la crepera de la Cocina: tocala para darla vuelta cuando se dore."},
+	{"name": "Jour 2 · Boulangerie", "new": ["croissant", "eclair"], "customers": 6,
+		"interval": [26.0, 32.0], "patience": 110.0, "max_toppings": 2, "show_zone": true,
+		"tip": "Los éclairs se decoran con la manga (botón Manga en la Crêperie): elegí el sabor que pidió y seguí la línea punteada manteniendo apretado. Cuanto mejor sigas la guía, más lindo queda."},
+	{"name": "Jour 3 · Dîner à Paris", "new": ["crepe_salada"], "customers": 8, "drinks": true,
+		"interval": [25.0, 31.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
+]
+const CREPE_SPREAD_TURNS := 3.0   # vueltas con el rastrillo para cubrir toda la crêpière
+const PIPE_FLAVORS := {"Chocolate": Color("4a2412"), "Café": Color("a0703a"), "Frutilla": Color("f28aa8")}
+
 # Molcajete (México): ingredientes de cada salsa y cuántas vueltas de mano hacen falta para molerla
 const MOLCAJETE := {
 	"Salsa verde": ["tomatillo", "chile", "cilantro"],
@@ -325,8 +357,10 @@ const COUNTRIES := {
 		"names": ["Giulia", "Marco", "Nonna Pina", "Luca", "Francesca", "Gino", "Sofia", "Paolo", "Chiara", "Enzo", "Rosaria", "Matteo"]},
 	"francia": {"name": "Francia", "city": "París", "restaurant": "Le Petit Crêpier", "lon": 2.35, "lat": 48.85, "label_left": true,
 		"flag": ["v", [Color("0055a4"), Color("ffffff"), Color("ef4135")]],
-		"cuisine": "Crêpes, croissants y pastelería", "cooking": "Sartén de crêpes y decoración con manga",
-		"price": 8000, "stars_needed": 4, "ready": false, "levels": []},
+		"cuisine": "Crêpes dulces y saladas, croissants y éclairs", "cooking": "Crêpière con rastrillo, crepera y decoración con manga",
+		"price": 8000, "stars_needed": 4, "ready": true, "levels": FRANCE_LEVELS, "prep": "creperie",
+		"names": ["Amélie", "Pierre", "Madame Colette", "Louis", "Chloé", "Jean", "Sophie", "Henri", "Camille", "Lucas", "Margaux", "Théo"],
+		"drinks": ["Agua", "Vino tinto", "Limonada", "Naranja"]},
 	"india": {"name": "India", "city": "Mumbai", "restaurant": "Masala Express", "lon": 72.8, "lat": 19.0,
 		"flag": ["h", [Color("ff9933"), Color("ffffff"), Color("138808")]],
 		"cuisine": "Curry, naan y lassi", "cooking": "Especias en orden y horno tandoor",

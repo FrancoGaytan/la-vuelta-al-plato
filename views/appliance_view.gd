@@ -46,6 +46,8 @@ func _center(i: int) -> Vector2:
 			return [Vector2(72, 92), Vector2(164, 92), Vector2(72, 206), Vector2(164, 206)][i]
 		"licuadora":
 			return [Vector2(62, 150), Vector2(174, 150)][i]
+		"crepera":
+			return [Vector2(118, 82), Vector2(118, 222)][i]
 	return Vector2(64, 108 + i * 84)
 
 
@@ -61,6 +63,8 @@ func _basket_y(i: int) -> float:
 func _food_rect(i: int) -> Rect2:
 	var c := _center(i)
 	match kind:
+		"crepera":
+			return Rect2(c - Vector2(54, 54), Vector2(108, 108))
 		"licuadora":
 			return Rect2(c - Vector2(40, 60), Vector2(80, 120))
 		"comal":
@@ -79,6 +83,8 @@ func _food_rect(i: int) -> Rect2:
 func _chip_rect(i: int) -> Rect2:
 	var c := _center(i)
 	match kind:
+		"crepera":
+			return Rect2(c.x + 30, c.y + 34, 88, 28)
 		"licuadora":
 			return Rect2(c.x - 52, 290, 104, 30)
 		"comal":
@@ -96,6 +102,8 @@ func _chip_rect(i: int) -> Rect2:
 
 func _hit_rect(i: int) -> Rect2:
 	match kind:
+		"crepera":
+			return Rect2(_center(i) - Vector2(66, 66), Vector2(184, 132))
 		"licuadora":
 			return Rect2(_center(i).x - 54, 30, 108, 292)
 		"comal":
@@ -129,7 +137,7 @@ func _gui_input(event: InputEvent) -> void:
 			s["tb"] = ta
 			s["rot"] = s.get("rot", 0.0) + PI
 			return
-		if kind == "comal" and not _chip_rect(i).has_point(mb.position):
+		if kind in ["comal", "crepera"] and not _chip_rect(i).has_point(mb.position):
 			# Tocar la tortilla: se da vuelta (el lado cocido queda arriba)
 			var st: Dictionary = slots[i]
 			var a: float = st["ta"]
@@ -164,6 +172,7 @@ func _draw() -> void:
 		"horno_lena": _draw_wood_oven(t)
 		"comal": _draw_comal(t)
 		"licuadora": _draw_blenders(t)
+		"crepera": _draw_crepera(t)
 	for i in slots.size():
 		if slots[i] != null:
 			_draw_chip(_chip_rect(i), slots[i], t)
@@ -649,8 +658,8 @@ func _draw_pizza_chip(rect: Rect2, s, time: float) -> void:
 	Art.rrect(self, rect, Color(0, 0, 0, 0.78), 7, border, 2 if border.a > 0 else 0)
 	var uneven := absf(ta - tb) > 2.0
 	var label := "¡girala!" if uneven else "sacar"
-	if kind == "comal":
-		# Tortilla: primero un lado, vuelta, después el otro
+	if kind in ["comal", "crepera"]:
+		# Tortilla o crêpe: primero un lado, vuelta, después el otro
 		uneven = ta >= target * 0.8 and tb < target * 0.6
 		label = "¡dala vuelta!" if uneven else ("sacar" if minf(ta, tb) >= target * 0.8 else "cocinando...")
 	Art.text(self, rect.position + Vector2(0, 12), label, 11,
@@ -753,3 +762,26 @@ func _draw_blenders(t: float) -> void:
 		Art.rrect(self, Rect2(c.x - 44, 28, 88, 16), Color("2a2a2a"), 6)
 		# Mango
 		draw_polyline(PackedVector2Array([Vector2(c.x + 40, 70), Vector2(c.x + 52, 74), Vector2(c.x + 50, 150), Vector2(c.x + 34, 156)]), Color(0.7, 0.8, 0.85, 0.9), 5)
+
+
+## Crepera (Francia): dos discos de hierro negro sobre un cuerpo de acero, con perillas
+func _draw_crepera(t: float) -> void:
+	Art.rrect(self, Rect2(0, 0, 236, 330), Color("8d969e"), 12, Color("aab3ba"), 4)
+	for k in 46:
+		draw_line(Vector2(5 + k * 5, 4), Vector2(5 + k * 5, 326), Color(1, 1, 1, 0.03 + 0.02 * (k % 3)), 1)
+	for i in 2:
+		var c := _center(i)
+		draw_circle(c + Vector2(3, 5), 64, Color(0, 0, 0, 0.3))
+		draw_circle(c, 64, Color("1c1d20"))
+		draw_circle(c, 58, Color("2c2e32"))
+		draw_arc(c, 61, PI * 1.1, PI * 1.6, 20, Color(1, 1, 1, 0.12), 3)
+		var on: bool = slots[i] != null
+		draw_circle(Vector2(20, c.y + 52), 5, Color("ff4a2a") if on else Color("5a2a22"))
+		draw_circle(Vector2(214, c.y - 50), 11, Color("1d1f22"))
+		draw_line(Vector2(214, c.y - 50), Vector2(219, c.y - 57), Color("e3e8ec"), 2)
+		var s = slots[i]
+		if s != null:
+			_food(i, s)
+			if s["ta"] > s["target"] * 0.8:
+				Art.steam(self, c + Vector2(0, -20), t, 0.6 if not _burning(s) else 1.6, i + 11,
+					Color.WHITE if maxf(s["ta"], s["tb"]) < s["burn"] else Color(0.3, 0.3, 0.3))
