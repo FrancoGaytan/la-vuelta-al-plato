@@ -23,6 +23,8 @@ func _process(_delta: float) -> void:
 	for s in slots:
 		if s != null and s.has("rot"):
 			s["rot_vis"] = lerpf(s.get("rot_vis", 0.0), s["rot"], 0.25)
+		if s != null and s.get("flip_vis", 0.0) > 0.0:
+			s["flip_vis"] = maxf(0.0, s["flip_vis"] - _delta * 4.0)
 	queue_redraw()
 
 
@@ -40,6 +42,8 @@ func _center(i: int) -> Vector2:
 			return Vector2(_vat_x(i), _basket_y(i) + 40)
 		"horno_lena":
 			return [Vector2(44, 236), Vector2(118, 246), Vector2(192, 236)][i]
+		"comal":
+			return [Vector2(72, 92), Vector2(164, 92), Vector2(72, 206), Vector2(164, 206)][i]
 	return Vector2(64, 108 + i * 84)
 
 
@@ -55,6 +59,8 @@ func _basket_y(i: int) -> float:
 func _food_rect(i: int) -> Rect2:
 	var c := _center(i)
 	match kind:
+		"comal":
+			return Rect2(c - Vector2(40, 40), Vector2(80, 80))
 		"olla":
 			return Rect2(c - Vector2(30, 30), Vector2(60, 60))
 		"plancha":
@@ -69,6 +75,8 @@ func _food_rect(i: int) -> Rect2:
 func _chip_rect(i: int) -> Rect2:
 	var c := _center(i)
 	match kind:
+		"comal":
+			return Rect2(c.x - 44, c.y + 40, 88, 28)
 		"olla":
 			return Rect2(c.x - 50, c.y + 54, 100, 30)
 		"plancha":
@@ -82,6 +90,8 @@ func _chip_rect(i: int) -> Rect2:
 
 func _hit_rect(i: int) -> Rect2:
 	match kind:
+		"comal":
+			return Rect2(_center(i) - Vector2(46, 44), Vector2(92, 112))
 		"olla":
 			return Rect2(_center(i) - Vector2(54, 54), Vector2(108, 140))
 		"plancha":
@@ -111,6 +121,14 @@ func _gui_input(event: InputEvent) -> void:
 			s["tb"] = ta
 			s["rot"] = s.get("rot", 0.0) + PI
 			return
+		if kind == "comal" and not _chip_rect(i).has_point(mb.position):
+			# Tocar la tortilla: se da vuelta (el lado cocido queda arriba)
+			var st: Dictionary = slots[i]
+			var a: float = st["ta"]
+			st["ta"] = st["tb"]
+			st["tb"] = a
+			st["flip_vis"] = 1.0
+			return
 		slot_clicked.emit(i)
 
 
@@ -136,6 +154,7 @@ func _draw() -> void:
 		"freidora": _draw_fryer(t)
 		"horno": _draw_oven(t)
 		"horno_lena": _draw_wood_oven(t)
+		"comal": _draw_comal(t)
 	for i in slots.size():
 		if slots[i] != null:
 			_draw_chip(_chip_rect(i), slots[i], t)
@@ -151,6 +170,17 @@ func _draw() -> void:
 
 func _food(i: int, s) -> void:
 	var rect := _food_rect(i)
+	if s.get("flip", false):
+		# Tortilla: se ve el lado de arriba; el borde muestra cómo va el de abajo. Al darla vuelta se aplana y gira.
+		var fv: float = s.get("flip_vis", 0.0)
+		var sy := absf(cos(fv * PI))
+		var ctr := rect.get_center()
+		draw_set_transform(ctr - Vector2(0, sin(fv * PI) * 18.0), 0.0, Vector2(1.0, maxf(sy, 0.08)))
+		var lr := Rect2(-rect.size / 2.0, rect.size)
+		Art.draw_cooking(self, s["item"], lr, s["tb"], s["target"], s["burn"])
+		draw_arc(Vector2.ZERO, rect.size.x * 0.41, 0, TAU, 36, Color(Art._crust_color(s["ta"], s["target"], s["burn"]), 0.85), 3.0)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		return
 	Art.draw_cooking(self, s["item"], rect, s["t"], s["target"], s["burn"])
 	# Granitos de sal encima (en la olla se disuelven: brillan un rato)
 	var pts: Array = s.get("salt_pts", [])
@@ -609,7 +639,12 @@ func _draw_pizza_chip(rect: Rect2, s, time: float) -> void:
 		border = Color("5ee06a")
 	Art.rrect(self, rect, Color(0, 0, 0, 0.78), 7, border, 2 if border.a > 0 else 0)
 	var uneven := absf(ta - tb) > 2.0
-	Art.text(self, rect.position + Vector2(0, 12), "¡girala!" if uneven else "sacar", 11,
+	var label := "¡girala!" if uneven else "sacar"
+	if kind == "comal":
+		# Tortilla: primero un lado, vuelta, después el otro
+		uneven = ta >= target * 0.8 and tb < target * 0.6
+		label = "¡dala vuelta!" if uneven else ("sacar" if minf(ta, tb) >= target * 0.8 else "cocinando...")
+	Art.text(self, rect.position + Vector2(0, 12), label, 11,
 		Color("ffd166") if uneven else Color(1, 1, 1, 0.85), HORIZONTAL_ALIGNMENT_CENTER, rect.size.x)
 	# Una barrita por mitad (la de arriba es la que mira al fuego)
 	for h in 2:
@@ -620,3 +655,46 @@ func _draw_pizza_chip(rect: Rect2, s, time: float) -> void:
 		draw_rect(Rect2(bar.position, Vector2(minf(tt, burn) * px, bar.size.y)), Art._crust_color(tt, target, burn))
 		if show_zone:
 			draw_rect(Rect2(bar.position.x + maxf(target - Data.ZONE, 0.0) * px, bar.position.y - 1, Data.ZONE * 2.0 * px, bar.size.y + 2), Color(0.4, 1, 0.4), false, 1.0)
+
+
+## Comal (México): disco de hierro negro sobre un fogón de adobe, con hasta 4 tortillas
+func _draw_comal(t: float) -> void:
+	# Fogón de adobe
+	Art.rrect(self, Rect2(0, 20, 236, 310), Color("b0643a"), 14, Color("7a3e1e"), 3)
+	for k in 7:
+		draw_line(Vector2(6, 60 + k * 40), Vector2(230, 60 + k * 40), Color(0, 0, 0, 0.1), 2)
+	# Boca del fuego, abajo
+	Art.rrect(self, Rect2(70, 284, 96, 40), Color("2a1208"), 18)
+	var any_on := false
+	for s in slots:
+		if s != null:
+			any_on = true
+	# Brasas de leña
+	for k in 7:
+		var fl := 0.6 + 0.4 * sin(t * 7.0 + k * 1.7)
+		Art.ellipse(self, Vector2(82 + k * 12, 312 - fl * 6.0), Vector2(7, 9 + fl * (8.0 if any_on else 4.0)), Color(1.0, 0.45 + 0.25 * fl, 0.1, 0.85))
+		Art.ellipse(self, Vector2(82 + k * 12, 314), Vector2(6, 4), Color("ffd27a"))
+	# Disco del comal
+	var c := Vector2(118, 150)
+	draw_circle(c + Vector2(4, 8), 116, Color(0, 0, 0, 0.3))
+	draw_circle(c, 116, Color("1c1a19"))
+	draw_circle(c, 108, Color("2d2a28"))
+	draw_arc(c, 112, PI * 1.1, PI * 1.6, 24, Color(1, 1, 1, 0.12), 3)
+	# Brillo del calor y marcas de uso
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 21
+	for k in 10:
+		var p := c + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(10, 96)
+		Art.ellipse(self, p, Vector2(rng.randf_range(8, 18), rng.randf_range(4, 9)), Color(0.5, 0.35, 0.2, 0.12))
+	draw_circle(c, 70, Color(1, 0.4, 0.1, 0.04 + 0.03 * sin(t * 2.0)))
+	for i in slots.size():
+		var s = slots[i]
+		if s == null:
+			continue
+		var p := _center(i)
+		Art.ellipse(self, p + Vector2(0, 4), Vector2(42, 40), Color(0, 0, 0, 0.35))
+		_food(i, s)
+		# Se infla y humea cuando el lado de abajo ya se cocinó
+		if s["ta"] > s["target"] * 0.8:
+			Art.steam(self, p + Vector2(0, -16), t, 0.6 if not _burning(s) else 1.6, i + 7,
+				Color.WHITE if maxf(s["ta"], s["tb"]) < s["burn"] else Color(0.3, 0.3, 0.3))

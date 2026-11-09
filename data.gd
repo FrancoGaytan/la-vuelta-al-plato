@@ -27,13 +27,13 @@ const TOOLS := {
 }
 # Heladera de la cocina: los ingredientes van agrupados por tipo
 const FRIDGE_GROUPS := [
-	["Carnes", ["milanesa", "bife", "pollo", "hamburguesa"]],
-	["Pastas y arroz", ["spaghetti", "noquis", "ravioles", "fettuccine", "arroz"]],
+	["Carnes", ["milanesa", "bife", "pollo", "hamburguesa", "carne_asada", "pastor"]],
+	["Pastas, arroz y granos", ["spaghetti", "noquis", "ravioles", "fettuccine", "arroz", "frijoles"]],
 	["Verduras", ["papas_fritas", "calabaza", "berenjena", "morron"]],
-	["Dulces", ["panqueque"]],
+	["Dulces", ["panqueque", "churros"]],
 ]
 const TOOL_ORDER := ["plato", "olla", "espatula", "canasto", "bandeja", "pala", "tabla"]
-const TOOL_FOR := {"olla": "olla", "plancha": "espatula", "freidora": "canasto", "horno": "bandeja", "horno_lena": "pala"}
+const TOOL_FOR := {"olla": "olla", "plancha": "espatula", "freidora": "canasto", "horno": "bandeja", "horno_lena": "pala"}   # el comal se maneja con la mano: no ensucia utensilios
 const DIRTY_FOOD := 0.8       # cocinar con un utensilio sucio: la comida vale 80%
 const DIRTY_PLATE := 0.75     # servir en plato sucio: el plato vale 75%
 const DIRTY_REPUTATION := 2.5 # al cerrar, cada cosa sin lavar baja la reputación del día (máximo 30)
@@ -113,8 +113,9 @@ const APPLIANCES := {
 	"freidora": {"name": "Freidora", "slots": 4},
 	"horno": {"name": "Horno", "slots": 3},
 	"horno_lena": {"name": "Horno de leña", "slots": 3},   # Italia: la pizza se gira con la pala
+	"comal": {"name": "Comal", "slots": 4},             # México: las tortillas se dan vuelta a mano
 }
-const APPLIANCE_ORDER := ["olla", "plancha", "freidora", "horno", "horno_lena"]
+const APPLIANCE_ORDER := ["comal", "olla", "plancha", "freidora", "horno", "horno_lena"]
 
 # kind: "cook" se cocina en un aparato (target = segundos ideales, burn = se quema)
 #       "chop" se corta en la tabla (cuts = cantidad de cortes)
@@ -153,6 +154,14 @@ const ITEMS := {
 	"pizza": {"name": "Pizza", "kind": "cook", "where": "horno_lena", "target": 9.0, "burn": 15.0, "built": true},
 	"fettuccine": {"name": "Fettuccine", "kind": "cook", "where": "olla", "salt": true, "target": 5.0, "burn": 10.0, "fresh": true},
 	"tiramisu": {"name": "Tiramisú", "kind": "ready"},
+	# México. La tortilla se aplana en la prensa ("built") y en el comal se cocina de los dos lados ("flip")
+	"tortilla": {"name": "Tortilla", "kind": "cook", "where": "comal", "target": 3.0, "burn": 6.5, "built": true, "flip": true},
+	"carne_asada": {"name": "Carne asada", "kind": "cook", "where": "plancha", "salt": true, "target": 8.0, "burn": 14.0,
+		"temps": [[0, 5], [8, 68], [14, 92]], "target_temp": 68},
+	"pastor": {"name": "Al pastor", "kind": "cook", "where": "plancha", "salt": true, "target": 7.0, "burn": 13.0},
+	"frijoles": {"name": "Frijoles", "kind": "cook", "where": "olla", "salt": true, "target": 10.0, "burn": 18.0},
+	"churros": {"name": "Churros", "kind": "cook", "where": "freidora", "target": 6.0, "burn": 11.0},
+	"queso": {"name": "Queso Oaxaca", "kind": "ready"},
 }
 
 # parts: cada parte es una lista de opciones; el cliente elige una por parte.
@@ -192,6 +201,15 @@ const RECIPES := {
 	"fettuccine": {"name": "Fettuccine", "cat": "Pasta fresca", "parts": [["fettuccine"]],
 		"sauces": ["Pomodoro", "Alfredo", "Pesto"], "toppings": ["Parmesano", "Albahaca"]},
 	"tiramisu": {"name": "Tiramisú", "cat": "Dolci", "parts": [["tiramisu"]], "sauces": [], "toppings": ["Cacao"], "min_toppings": 1},
+	# México. Las salsas "Salsa verde", "Salsa roja" y "Guacamole" se muelen en el molcajete (MOLCAJETE)
+	"tacos": {"name": "Tacos", "cat": "Tacos", "parts": [["tortilla"], ["carne_asada", "pastor", "pollo"]],
+		"sauces": ["Salsa verde", "Salsa roja", "Guacamole"], "toppings": ["Cebolla y cilantro", "Limón", "Piña"]},
+	"quesadilla": {"name": "Quesadilla", "cat": "Antojitos", "parts": [["tortilla"], ["queso"]],
+		"sauces": ["Salsa verde", "Salsa roja", "Guacamole"], "toppings": ["Cebolla y cilantro", "Jalapeños"]},
+	"plato_mex": {"name": "Plato con arroz y frijoles", "cat": "Platos fuertes", "parts": [["carne_asada", "pollo"], ["arroz"], ["frijoles"]],
+		"sauces": ["Salsa roja", "Salsa verde", "Sin salsa"], "toppings": ["Queso fresco", "Crema"]},
+	"churros": {"name": "Churros", "cat": "Postres", "parts": [["churros"]], "sauces": [],
+		"toppings": ["Azúcar y canela", "Chocolate"], "min_toppings": 1},
 }
 
 # Cada día suma recetas nuevas al menú y sube la dificultad.
@@ -225,6 +243,26 @@ const ITALY_LEVELS := [
 		"interval": [25.0, 31.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
 ]
 
+# Días de La Comalera (Ciudad de México)
+const MEXICO_LEVELS := [
+	{"name": "Día 1 · La taquería", "new": ["tacos"], "customers": 5,
+		"interval": [28.0, 34.0], "patience": 110.0, "max_toppings": 2, "show_zone": true,
+		"tip": "En la Tortillería (tecla 3): bolita de masa a la prensa, bajá la palanca y mandala al comal. En el comal tocá la tortilla para darla vuelta: se cocina el lado de abajo. Las salsas se muelen en el molcajete (botón Molcajete): cada molida rinde 4 porciones."},
+	{"name": "Día 2 · Antojitos", "new": ["quesadilla", "churros"], "customers": 6,
+		"interval": [26.0, 32.0], "patience": 110.0, "max_toppings": 2, "show_zone": true},
+	{"name": "Día 3 · Comida corrida", "new": ["plato_mex"], "customers": 8, "drinks": true,
+		"interval": [25.0, 31.0], "patience": 115.0, "max_toppings": 3, "show_zone": false},
+]
+
+# Molcajete (México): ingredientes de cada salsa y cuántas vueltas de mano hacen falta para molerla
+const MOLCAJETE := {
+	"Salsa verde": ["tomatillo", "chile", "cilantro"],
+	"Salsa roja": ["tomate", "chile", "ajo"],
+	"Guacamole": ["palta", "cebolla", "limon"],
+}
+const MOLCAJETE_TURNS := 5.0     # vueltas completas con el tejolote
+const MOLCAJETE_YIELD := 4       # porciones por molida
+
 # =====================================================================
 # Modo historia: cada país es un "paquete" con su ciudad, su cocina, sus días y su forma de cocinar.
 # Solo gana plata el local donde jugás; lo ganado va a los ahorros, que sirven para abrir países nuevos.
@@ -238,8 +276,10 @@ const COUNTRIES := {
 		"cooking": "Plancha, olla, freidora y horno", "price": 0, "stars_needed": 0, "ready": true, "levels": LEVELS},
 	"mexico": {"name": "México", "city": "Ciudad de México", "restaurant": "La Comalera", "lon": -99.1, "lat": 19.4,
 		"flag": ["v", [Color("006847"), Color("ffffff"), Color("ce1126")]],
-		"cuisine": "Tacos, quesadillas y salsas", "cooking": "Comal para tortillas y molcajete para moler",
-		"price": 6000, "stars_needed": 2, "ready": false, "levels": []},
+		"cuisine": "Tacos, quesadillas, churros y salsas molidas", "cooking": "Prensa y comal para las tortillas, molcajete para las salsas",
+		"price": 6000, "stars_needed": 2, "ready": true, "levels": MEXICO_LEVELS, "prep": "tortilleria",
+		"names": ["Lupita", "Chuy", "Doña Carmen", "Pepe", "Xóchitl", "Memo", "Rosa", "Toño", "Paco", "Mari", "Don Beto", "Itzel"],
+		"drinks": ["Agua", "Cola", "Agua de jamaica", "Horchata", "Limonada"]},
 	"eeuu": {"name": "Estados Unidos", "city": "Nueva York", "restaurant": "Big Apple Diner", "lon": -74.0, "lat": 40.7,
 		"flag": ["barras", [Color("b22234"), Color("ffffff"), Color("3c3b6e")]],
 		"cuisine": "Hamburguesas, hot dogs y malteadas", "cooking": "Armado por capas a contrarreloj",
@@ -247,7 +287,8 @@ const COUNTRIES := {
 	"italia": {"name": "Italia", "city": "Roma", "restaurant": "Trattoria del Forno", "lon": 12.5, "lat": 41.9,
 		"flag": ["v", [Color("009246"), Color("ffffff"), Color("ce2b37")]],
 		"cuisine": "Pizza al horno de leña, pasta fresca y tiramisú", "cooking": "Mesa de pizza y horno de leña con pala",
-		"price": 5000, "stars_needed": 0, "ready": true, "levels": ITALY_LEVELS, "prep": "mesa"},
+		"price": 5000, "stars_needed": 0, "ready": true, "levels": ITALY_LEVELS, "prep": "mesa",
+		"names": ["Giulia", "Marco", "Nonna Pina", "Luca", "Francesca", "Gino", "Sofia", "Paolo", "Chiara", "Enzo", "Rosaria", "Matteo"]},
 	"francia": {"name": "Francia", "city": "París", "restaurant": "Le Petit Crêpier", "lon": 2.35, "lat": 48.85, "label_left": true,
 		"flag": ["v", [Color("0055a4"), Color("ffffff"), Color("ef4135")]],
 		"cuisine": "Crêpes, croissants y pastelería", "cooking": "Sartén de crêpes y decoración con manga",
@@ -301,6 +342,8 @@ const DRINKS := {
 	"Pomelo": {"color": Color("f2a3a8"), "label": Color("d9475a"), "kind": "lata"},
 	"Limonada": {"color": Color("f3e27a"), "label": Color("4f9a48"), "kind": "botella"},
 	"Vino tinto": {"color": Color("6e0f22"), "label": Color("efe4c8"), "kind": "vino"},   # se sirve en copa: hay que llenarla con la botella
+	"Agua de jamaica": {"color": Color("a3123f"), "label": Color("f6c6d6"), "kind": "botella"},
+	"Horchata": {"color": Color("f1e8d6"), "label": Color("b07a3a"), "kind": "botella"},
 }
 
 # Pasta fresca (Italia): se amasa a mano en la Mesa. Lo que lleva "fresh" en ITEMS no está en la heladera
