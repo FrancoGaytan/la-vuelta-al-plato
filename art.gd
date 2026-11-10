@@ -2047,6 +2047,11 @@ static func candy_jar(ci: CanvasItem, r: Rect2) -> void:
 
 ## Salón con ventana, puerta, pizarra con el menú y lámparas. decor = mejoras compradas que se ven.
 static func draw_dining(ci: CanvasItem, rect: Rect2, menu: Array, time: float, decor: Array = [], theme := "argentina") -> void:
+	_draw_dining_base(ci, rect, menu, time, decor, theme)
+	draw_salon_decor(ci, rect, decor, time)
+
+
+static func _draw_dining_base(ci: CanvasItem, rect: Rect2, menu: Array, time: float, decor: Array = [], theme := "argentina") -> void:
 	if theme == "italia":
 		draw_dining_italia(ci, rect, menu, time, decor)
 		return
@@ -3337,3 +3342,28 @@ static func draw_sauce_bottle(ci: CanvasItem, rect: Rect2, col: Color) -> void:
 	ci.draw_circle(d, dr, col if col.v < 0.93 else col.darkened(0.15))
 	ci.draw_colored_polygon(PackedVector2Array([d + Vector2(-dr * 0.85, -dr * 0.45), d + Vector2(0, -dr * 2.0), d + Vector2(dr * 0.85, -dr * 0.45)]),
 		col if col.v < 0.93 else col.darkened(0.15))
+
+
+## Mejoras caras del salón que se ven en todos los locales: lámparas de diseño y el pianista (notas que flotan)
+static func draw_salon_decor(ci: CanvasItem, rect: Rect2, decor: Array, time: float) -> void:
+	var o := rect.position
+	if "lamparas" in decor:
+		for x in [560.0, 760.0]:
+			var top := o + Vector2(x, 14)
+			ci.draw_line(top, top + Vector2(0, 40), Color("8a6a1e"), 2)
+			var c := top + Vector2(0, 52)
+			ci.draw_circle(c, 32, Color(1, 0.85, 0.45, 0.12 + 0.03 * sin(time * 2.0 + x)))
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-22, 4), c + Vector2(22, 4), c + Vector2(12, -12), c + Vector2(-12, -12)]), Color("c9a24a"))
+			for k in 3:
+				var b := c + Vector2((k - 1) * 14, 10)
+				ci.draw_circle(b, 5, Color(1, 0.92, 0.6))
+	if "pianista" in decor:
+		# Notas musicales que suben despacio
+		for k in 4:
+			var ph := fmod(time * 0.25 + k * 0.25, 1.0)
+			var p := o + Vector2(880 + k * 70 + sin(time + k) * 10, 210 - ph * 160)
+			var col := Color(0.25, 0.15, 0.08, 0.7 * (1.0 - ph))
+			ellipse(ci, p, Vector2(6, 4.5), col)
+			ci.draw_line(p + Vector2(5, 0), p + Vector2(5, -18), col, 2)
+			if k % 2 == 0:
+				ci.draw_line(p + Vector2(5, -18), p + Vector2(13, -13), col, 2)

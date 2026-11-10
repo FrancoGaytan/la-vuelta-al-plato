@@ -193,6 +193,7 @@ var tip_check := 0.0
 var critic_at := -1                  # qué cliente del día es el crítico de la guía (-1 = hoy no viene)
 var critic_score := -1.0             # nota que le dio al plato (-1 = todavía no comió)
 var critic_name := ""
+var critic_capped := false            # el salón le bajó la nota al crítico
 var pending_order: Dictionary = {}   # pedido que la moza está anotando
 var pending_timer := 0.0
 var waiter_look: Dictionary = {}
@@ -976,7 +977,20 @@ func _guide_stars(id: String) -> int:
 ## ¿Viene el crítico de la guía en este día? Solo si al local le faltan estrellas y el día es lo bastante avanzado.
 func _critic_comes(day: int) -> bool:
 	var st := _guide_stars(current_country)
-	return st < 3 and day >= Data.critic_min_day(_levels().size(), st)
+	# Como mucho una vez cada CRITIC_EVERY días jugados en el local
+	var since: int = country_progress.get(current_country, {}).get("sin_critico", Data.CRITIC_EVERY - 1)
+	return st < 3 and day >= Data.critic_min_day(_levels().size(), st) and since >= Data.CRITIC_EVERY - 1
+
+
+## Nivel del salón: cuántas mejoras para los clientes se compraron
+func _salon_level() -> int:
+	return Data.SALON_UPGRADES.filter(func(u): return _has(u)).size()
+
+
+## La nota máxima que puede poner un cliente (o el crítico) según cómo está el salón
+func _score_cap(critic := false) -> float:
+	var c: Array = Data.CRITIC_CAP if critic else Data.CLIENT_CAP
+	return minf(100.0, c[0] + c[1] * _salon_level())
 
 
 func _has(upgrade: String) -> bool:
@@ -1008,8 +1022,10 @@ func _show_shop(next_level := -1) -> void:
 	cash.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cash.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	head.add_child(cash)
+	var sl := _salon_level()
+	box.add_child(_label("Nivel del salón: %d de %d  ·  los clientes te ponen hasta %d%%  ·  el crítico, hasta %d%%" % [sl, Data.SALON_UPGRADES.size(), int(_score_cap()), int(_score_cap(true))], 15, Color("8a5a10")))
 	var grid := GridContainer.new()
-	grid.columns = 3
+	grid.columns = 5
 	grid.add_theme_constant_override("h_separation", 10)
 	grid.add_theme_constant_override("v_separation", 10)
 	box.add_child(grid)
@@ -1034,12 +1050,12 @@ func _shop_card(id: String, next_level: int) -> Control:
 	sb.set_corner_radius_all(8)
 	sb.set_content_margin_all(8)
 	card.add_theme_stylebox_override("panel", sb)
-	card.custom_minimum_size = Vector2(250, 0)
+	card.custom_minimum_size = Vector2(214, 0)
 	var col := HBoxContainer.new()
 	col.add_theme_constant_override("separation", 8)
 	card.add_child(col)
 	var pic := PropButton.new()
-	pic.custom_minimum_size = Vector2(64, 64)
+	pic.custom_minimum_size = Vector2(50, 56)
 	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pic.draw_fn = func(ci, r): _draw_upgrade_icon(ci, r, id)
 	col.add_child(pic)
@@ -1047,10 +1063,15 @@ func _shop_card(id: String, next_level: int) -> Control:
 	info.add_theme_constant_override("separation", 2)
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.add_child(info)
-	info.add_child(_label("%s  ·  %s" % [up["name"], up["for"]], 14, COL_INK))
-	var d := _label(up["desc"], 12, Color(0.3, 0.24, 0.18))
+	var title := _label(up["name"], 14, COL_INK)
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.custom_minimum_size = Vector2(136, 0)
+	info.add_child(title)
+	if id in Data.SALON_UPGRADES:
+		info.add_child(_label("Salón +1", 12, Color("8a5a10")))
+	var d := _label(up["desc"], 11, Color(0.3, 0.24, 0.18))
 	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	d.custom_minimum_size = Vector2(160, 0)
+	d.custom_minimum_size = Vector2(136, 0)
 	info.add_child(d)
 	if _has(id):
 		info.add_child(_label("Comprado", 14, Color("2f7a3a")))
@@ -1103,6 +1124,27 @@ func _draw_upgrade_icon(ci: CanvasItem, r: Rect2, id: String) -> void:
 			Art.draw_food(ci, "zanahoria", Rect2(c + Vector2(-s * 0.16, -s * 0.32), Vector2(s * 0.32, s * 0.34)), Color.WHITE, true)
 		"ayudante":
 			Art.draw_character(ci, Art.chef_look(), Vector2(c.x, r.end.y), s / 190.0, 0, Time.get_ticks_msec() / 1000.0)
+		"manteles":
+			Art.rrect(ci, Rect2(c + Vector2(-s * 0.4, -s * 0.1), Vector2(s * 0.8, s * 0.12)), Color("8a5a2b"), 3)
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-s * 0.42, -s * 0.12), c + Vector2(s * 0.42, -s * 0.12), c + Vector2(s * 0.46, s * 0.3), c + Vector2(-s * 0.46, s * 0.3)]), Color("f6f0e0"))
+			for k in 5:
+				ci.draw_line(c + Vector2(-s * 0.36 + k * s * 0.18, -s * 0.1), c + Vector2(-s * 0.4 + k * s * 0.2, s * 0.28), Color("c0392b"), 2)
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(s * 0.05, -s * 0.2), c + Vector2(s * 0.22, -s * 0.2), c + Vector2(s * 0.14, -s * 0.38)]), Color("c0392b"))
+		"lamparas":
+			ci.draw_line(Vector2(c.x, r.position.y), c + Vector2(0, -s * 0.12), Color("8a6a1e"), 2)
+			ci.draw_circle(c + Vector2(0, s * 0.1), s * 0.38, Color(1, 0.85, 0.45, 0.25))
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-s * 0.3, s * 0.12), c + Vector2(s * 0.3, s * 0.12), c + Vector2(s * 0.16, -s * 0.12), c + Vector2(-s * 0.16, -s * 0.12)]), Color("c9a24a"))
+			for k in 3:
+				ci.draw_circle(c + Vector2((k - 1) * s * 0.18, s * 0.22), s * 0.07, Color(1, 0.92, 0.6))
+		"pianista":
+			Art.rrect(ci, Rect2(c + Vector2(-s * 0.4, -s * 0.3), Vector2(s * 0.8, s * 0.55)), Color("2a1e18"), 6)
+			ci.draw_rect(Rect2(c + Vector2(-s * 0.36, s * 0.05), Vector2(s * 0.72, s * 0.12)), Color("fbfbf8"))
+			for k in 7:
+				ci.draw_line(c + Vector2(-s * 0.36 + k * s * 0.1, s * 0.05), c + Vector2(-s * 0.36 + k * s * 0.1, s * 0.17), Color("2a1e18"), 1.5)
+			for k in 5:
+				ci.draw_rect(Rect2(c + Vector2(-s * 0.32 + k * s * 0.14, s * 0.05), Vector2(s * 0.05, s * 0.07)), Color("2a1e18"))
+			Art.ellipse(ci, c + Vector2(s * 0.2, -s * 0.42), Vector2(s * 0.06, s * 0.045), Color("3a2a1a"))
+			ci.draw_line(c + Vector2(s * 0.25, -s * 0.42), c + Vector2(s * 0.25, -s * 0.6), Color("3a2a1a"), 2)
 
 
 func _show_menu() -> void:
@@ -1161,7 +1203,7 @@ func _show_menu() -> void:
 	var gtxt := "%s: %d de 3 estrellas (+$%d de propina por cliente)" % [Data.GUIDE_NAME, gst, Data.STAR_TIP * gst]
 	if gst < 3:
 		var from_day := Data.critic_min_day(_levels().size(), gst) + 1
-		gtxt += "\nPróxima: desde el día %d viene un crítico de incógnito. Su plato tiene que llegar al %d%%." % [from_day, int(Data.CRITIC_NEEDS[gst])]
+		gtxt += "\nPróxima: un crítico de incógnito (desde el día %d, como mucho 1 de cada %d días). Su plato tiene que llegar al %d%%; con tu salón hoy pone hasta %d%%." % [from_day, Data.CRITIC_EVERY, int(Data.CRITIC_NEEDS[gst]), int(_score_cap(true))]
 	else:
 		gtxt += "\n¡Local con las tres estrellas de la guía!"
 	var gl := _label(gtxt, 14, COL_INK)
@@ -1504,6 +1546,7 @@ func _start_level(i: int) -> void:
 	critic_at = -1
 	critic_score = -1.0
 	critic_name = ""
+	critic_capped = false
 	if _critic_comes(i):
 		critic_at = rng.randi_range(2, maxi(2, int(level["customers"]) - 1))
 	# El día arranca con todo limpio
@@ -1643,6 +1686,12 @@ func _finish_level() -> void:
 		else:
 			critic_msg = "%s era el crítico de la guía: le puso %d%% al plato y para la estrella hacía falta %d%%. Va a volver." % [
 				critic_name, int(critic_score), int(need)]
+		if star_won == 0 and critic_capped:
+			critic_msg += "\nEn su libreta escribió: «La cocina promete, pero el salón no está a la altura». Mejorá el salón en la Tienda (hoy un crítico pone como mucho %d%%)." % int(_score_cap(true))
+	# Días sin crítico en este local (viene como mucho uno de cada CRITIC_EVERY)
+	var cpc: Dictionary = country_progress.get(current_country, {})
+	cpc["sin_critico"] = 0 if critic_at > 0 else int(cpc.get("sin_critico", Data.CRITIC_EVERY - 1)) + 1
+	country_progress[current_country] = cpc
 	_save_progress()
 
 	var box := _open_overlay()
@@ -1663,6 +1712,8 @@ func _finish_level() -> void:
 	box.add_child(_label("Calificación promedio: %d%%" % int(avg), 20, COL_INK))
 	if dirty_left > 0:
 		box.add_child(_label("Quedaron %d cosas sin lavar: -%d de reputación" % [dirty_left, int(dirty_pen)], 18, Color("a8321e")))
+	if _score_cap() < 100.0 and avg >= _score_cap() - 4.0:
+		box.add_child(_label("Los clientes comentaron el salón: con este local te ponen como mucho %d%%. Mejoralo en la Tienda." % int(_score_cap()), 16, Color("8a5a10")))
 	box.add_child(_label("Recaudado hoy: $%d   ·   Ahorros: $%d" % [money, savings], 20, COL_INK))
 	if critic_msg != "":
 		var crow := HBoxContainer.new()
@@ -2522,6 +2573,10 @@ func _deliver() -> void:
 	if dirty_plate:
 		total *= Data.DIRTY_PLATE
 	dirty.append("plato")      # el plato vuelve sucio a la bacha
+	# El salón también se califica: con el lugar pelado nadie pone la nota máxima (y el crítico, menos)
+	var cap := _score_cap(o.get("critic", false))
+	var capped := total > cap + 0.5
+	total = minf(total, cap)
 	var tip := int(round(total / 10.0))
 	if s_drink >= 100.0:
 		tip += 3
@@ -2539,6 +2594,13 @@ func _deliver() -> void:
 		verdict = "Muy rico"
 	elif total >= 55.0:
 		verdict = "Zafa"
+	# Lo que dicen del lugar
+	var sl := _salon_level()
+	if capped:
+		verdict = ["La comida, un diez; el lugar, medio pelado", "Muy rico, pero el salón no acompaña",
+			"Cocinan bárbaro... ¡arreglen un poco el local!", "Rico, aunque el lugar es bastante simple"][o["id"] % 4]
+	elif sl >= 4 and total >= 90.0:
+		verdict = ["¡Qué lindo lugar, y qué rico!", "Da gusto comer acá", "¡Comida y salón de diez!"][o["id"] % 3]
 
 	last_result = {
 		"name": o["name"], "look": o["look"], "total": total, "verdict": verdict, "pay": pay, "tip": tip,
@@ -2547,6 +2609,8 @@ func _deliver() -> void:
 	}
 	if dirty_plate:
 		last_result["lines"].append("¡Plato sucio! -25%")
+	if capped:
+		last_result["lines"].append("Salón: tope %d%%" % int(cap))
 	if o.get("drink", "") == "Vino tinto" and o.get("plate_drink", "") == "Vino tinto":
 		last_result["lines"].append("Copa: %s" % Data.wine_desc(o.get("wine_fill", 0.0), o.get("wine_spill", 0.0)))
 	if order_ok >= 0.0:
@@ -2555,6 +2619,7 @@ func _deliver() -> void:
 		last_result["lines"].append("Especias %d" % int(spice_q))
 	if o.get("critic", false):
 		critic_score = total
+		critic_capped = capped
 		last_result["verdict"] = "Mmm... (anota en la libreta)"
 		_hint("El de anteojos oscuros probó, anotó algo y no dijo nada... al cerrar vas a saber qué escribió")
 

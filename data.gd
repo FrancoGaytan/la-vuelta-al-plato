@@ -78,6 +78,12 @@ const UPGRADES := {
 		"desc": "Caramelos en el mostrador: +$1 de propina por cliente."},
 	"vajilla": {"name": "Vajilla con borde dorado", "price": 90, "for": "Clientes",
 		"desc": "Los platos lucen mejor: +$3 de propina por cliente."},
+	"manteles": {"name": "Manteles de tela", "price": 350, "for": "Clientes",
+		"desc": "Mesas con mantel y servilleta de tela: el salón sube de nivel."},
+	"lamparas": {"name": "Lámparas de diseño", "price": 600, "for": "Clientes",
+		"desc": "Luz cálida y elegante: el salón sube de nivel."},
+	"pianista": {"name": "Pianista", "price": 900, "for": "Clientes",
+		"desc": "Música en vivo durante el servicio: el salón sube de nivel."},
 	"timbre": {"name": "Timbre de cocina", "price": 70, "for": "Cocina",
 		"desc": "Suena una campanita cuando algo llega a su punto."},
 	"reloj": {"name": "Reloj con marcas", "price": 120, "for": "Cocina",
@@ -91,7 +97,14 @@ const UPGRADES := {
 	"ayudante": {"name": "Ayudante de cocina", "price": 260, "for": "Cocina",
 		"desc": "Saca la comida del fuego justo en su punto: nunca más se quema nada."},
 }
-const UPGRADE_ORDER := ["caramelera", "plantas", "vajilla", "ventilador", "timbre", "procesadora", "hornalla", "lavavajillas", "reloj", "ayudante"]
+const UPGRADE_ORDER := ["caramelera", "plantas", "vajilla", "ventilador", "manteles", "lamparas", "pianista", "timbre", "procesadora", "hornalla", "lavavajillas", "reloj", "ayudante"]
+
+# Nivel del salón: cada mejora para los clientes que se compró. Con el salón pelado nadie pone la nota máxima,
+# y el crítico es mucho más exigente (sin invertir no hay estrellas).
+const SALON_UPGRADES := ["caramelera", "plantas", "vajilla", "ventilador", "manteles", "lamparas", "pianista"]
+const CLIENT_CAP := [92.0, 2.0]    # nota máxima de un cliente: 92% + 2% por nivel del salón
+const CRITIC_CAP := [72.0, 4.0]    # nota máxima del crítico: 72% + 4% por nivel (85% pide 4 mejoras, 94% pide 6)
+const CRITIC_EVERY := 6            # el crítico viene como mucho una vez cada 6 días jugados en el local
 
 
 ## Temperatura interna (°C) de una carne después de t segundos de cocción.
