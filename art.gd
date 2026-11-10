@@ -1779,8 +1779,8 @@ static func draw_guide_seal(ci: CanvasItem, c: Vector2, r: float, n: int, time :
 static func draw_drink(ci: CanvasItem, rect: Rect2, name: String, drinks: Dictionary) -> void:
 	var d: Dictionary = drinks.get(name, {"color": Color.WHITE, "label": Color.GRAY, "kind": "lata"})
 	var c := rect.get_center()
-	var h := rect.size.y * 0.9
-	var w := minf(rect.size.x * 0.55, h * 0.42)
+	var h := rect.size.y * 0.94
+	var w := minf(rect.size.x * 0.55, h * 0.48)
 	if d["kind"] == "vino":
 		draw_wine_glass(ci, Rect2(c.x - h * 0.3, c.y - h / 2.0, h * 0.6, h), 1.0, 0.0)
 		return
@@ -3302,3 +3302,38 @@ static func draw_counter_japon(ci: CanvasItem, rect: Rect2, top: float) -> void:
 	grad_rect(ci, Rect2(rect.position.x, y, rect.size.x, 20), Color("8a6a42"), Color("5a3a22"))
 	ci.draw_rect(Rect2(rect.position.x, y + 3, rect.size.x, 2), Color(1, 1, 1, 0.25))
 	ci.draw_rect(Rect2(rect.position.x, y + 20, rect.size.x, 6), Color(0, 0, 0, 0.3))
+
+
+## Pegatina de papel con un nombre (en potes y botellas): la letra se achica si el nombre es largo
+static func draw_sticker(ci: CanvasItem, rect: Rect2, s: String) -> void:
+	rrect(ci, Rect2(rect.position + Vector2(1, 2), rect.size), Color(0, 0, 0, 0.18), 6)
+	rrect(ci, rect, Color("fffdf6"), 6, Color("c9a86a"), 1)
+	var font := ThemeDB.fallback_font
+	var fs := 13
+	while fs > 8 and font.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > rect.size.x - 6:
+		fs -= 1
+	text(ci, Vector2(rect.position.x, rect.get_center().y + fs * 0.36), s, fs, INK, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x)
+
+
+## Botella de salsa tipo pomo: grande, con pico, tapa y una gota del color de la salsa en la etiqueta
+static func draw_sauce_bottle(ci: CanvasItem, rect: Rect2, col: Color) -> void:
+	var c := rect.get_center()
+	var h := rect.size.y * 0.92
+	var w := minf(rect.size.x * 0.62, h * 0.5)
+	var body := Rect2(c.x - w / 2.0, rect.end.y - h * 0.78, w, h * 0.78)
+	ellipse(ci, Vector2(c.x + 2, rect.end.y), Vector2(w * 0.6, 4), Color(0, 0, 0, 0.2))
+	# Pico y tapa
+	ci.draw_colored_polygon(PackedVector2Array([Vector2(c.x - 3, rect.end.y - h), Vector2(c.x + 3, rect.end.y - h),
+		Vector2(c.x + w * 0.18, body.position.y - h * 0.06), Vector2(c.x - w * 0.18, body.position.y - h * 0.06)]), col.darkened(0.25))
+	rrect(ci, Rect2(c.x - w * 0.32, body.position.y - h * 0.08, w * 0.64, h * 0.1), col.darkened(0.35), 3)
+	# Cuerpo con brillo
+	rrect(ci, body, col, w * 0.28, col.darkened(0.35), 2)
+	rrect(ci, Rect2(body.position + Vector2(w * 0.12, h * 0.05), Vector2(w * 0.14, body.size.y * 0.75)), Color(1, 1, 1, 0.3), 4)
+	# Etiqueta blanca con una gota de la salsa
+	var lab := Rect2(body.position.x + w * 0.1, body.position.y + body.size.y * 0.38, w * 0.8, body.size.y * 0.36)
+	rrect(ci, lab, Color("fffdf6"), 4)
+	var d := lab.get_center() + Vector2(0, lab.size.y * 0.08)
+	var dr := lab.size.y * 0.3
+	ci.draw_circle(d, dr, col if col.v < 0.93 else col.darkened(0.15))
+	ci.draw_colored_polygon(PackedVector2Array([d + Vector2(-dr * 0.85, -dr * 0.45), d + Vector2(0, -dr * 2.0), d + Vector2(dr * 0.85, -dr * 0.45)]),
+		col if col.v < 0.93 else col.darkened(0.15))

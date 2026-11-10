@@ -3088,17 +3088,19 @@ func _build_drinks_fridge(o, rect: Rect2) -> void:
 		Art.rrect(ci, Rect2(Vector2.ZERO, rect.size), Color("dfe5ea"), 8, Color("9aa3ab"), 3)
 		Art.rrect(ci, Rect2(6, 22, rect.size.x - 12, rect.size.y - 28), Color("eaf4f8"), 5)
 		Art.text(ci, Vector2(0, 16), "BEBIDAS", 12, Color("4a5560"), HORIZONTAL_ALIGNMENT_CENTER, rect.size.x)
-		for r in 3:
-			ci.draw_rect(Rect2(6, 22 + (r + 1) * 86 - 3, rect.size.x - 12, 3), Color("c5ccd2"))
+		for r in 2:
+			ci.draw_rect(Rect2(6, 20 + (r + 1) * 72 - 3, rect.size.x - 12, 3), Color("c5ccd2"))
 		ci.draw_rect(Rect2(6, 22, rect.size.x - 12, rect.size.y - 28), Color(0.7, 0.85, 1.0, 0.12))
 	_painter(rect, draw_fridge, false)
 	var names: Array = _drinks().filter(func(d): return Data.DRINKS[d]["kind"] != "vino")   # el vino va en copa, aparte
 	for k in names.size():
 		var n: String = names[k]
-		var b := _prop(Rect2(rect.position.x + 6 + (k % 2) * 57, rect.position.y + 24 + (k / 2) * 86, 57, 82))
-		b.draw_fn = func(ci, rr): Art.draw_drink(ci, rr, n, Data.DRINKS)
+		# Dos estantes de cuatro bebidas
+		var cw := (rect.size.x - 12.0) / 4.0
+		var b := _prop(Rect2(rect.position.x + 6 + (k % 4) * cw, rect.position.y + 20 + (k / 4) * 72, cw, 70))
+		b.draw_fn = func(ci, rr): Art.draw_drink(ci, rr.grow(2), n, Data.DRINKS)
 		b.text = n
-		b.text_size = 9
+		b.text_size = 11
 		b.selected = o.get("plate_drink", "") == n
 		b.drag_data = {"kind": "drink", "name": n}
 		b.tooltip_text = "Arrastrá %s hasta la bandeja" % n.to_lower()
@@ -3355,8 +3357,10 @@ func _build_mesa_station() -> void:
 	var tops := _cat_options("Pizzas", "toppings")
 	for k in tops.size():
 		var tname: String = tops[k]
-		var b := _prop(Rect2(x0 + (k % 6) * 88, 212 + (k / 6) * 88, 84, 84))
-		b.draw_fn = func(ci, rr): Art.draw_bowl(ci, rr, tname)
+		var b := _prop(Rect2(x0 + (k % 6) * 88, 212 + (k / 6) * 92, 84, 90))
+		b.draw_fn = func(ci, rr):
+			Art.draw_bowl(ci, Rect2(rr.position, rr.size - Vector2(0, 22)), tname)
+			Art.draw_sticker(ci, Rect2(rr.position.x + 2, rr.end.y - 24, rr.size.x - 4, 22), tname)
 		b.selected = mesa_pizza != null and tname in mesa_pizza["plate_toppings"]
 		b.mouse_default_cursor_shape = Control.CURSOR_DRAG
 		b.tooltip_text = "%s: mantené apretado y pasalo por arriba de la masa" % tname
@@ -4421,8 +4425,8 @@ func _build_plating_station() -> void:
 	# Centro: el plato (recibe lo que se arrastra)
 	var drinks := false     # las bebidas se sirven en la Entrega (se ven en el plato si ya están)
 	var plate := PlateView.new()
-	plate.position = Vector2(396 if drinks else 410, 36)
-	plate.size = Vector2(400 if drinks else 420, 384)
+	plate.position = Vector2(400, 40)
+	plate.size = Vector2(370, 370)
 	plate.items = o["plate"]
 	plate.sauce = o["plate_sauce"]
 	plate.toppings = o["plate_toppings"]
@@ -4435,7 +4439,7 @@ func _build_plating_station() -> void:
 	station_box.add_child(plate)
 	plating_plate = plate
 	var reset := _button("Rehacer plato", _reset_plate, 15)
-	reset.position = Vector2(540 if drinks else 556, 424)
+	reset.position = Vector2(522, 420)
 	reset.tooltip_text = "Devuelve lo del plato a la bandeja. Para tirar el plato, arrastralo al cesto."
 	station_box.add_child(reset)
 
@@ -4449,7 +4453,7 @@ func _build_plating_station() -> void:
 		_build_drinks_fridge(o, Rect2(1146, 176, 126, 286))
 
 	# Derecha: salsas y toppings del mismo tipo de plato
-	var x0 := 806.0 if drinks else 846.0
+	var x0 := 784.0      # 5 columnas a la derecha del plato
 	var y := 42.0
 	var prebuilt: bool = r.get("prebuilt", false)   # la pizza ya viene con salsa e ingredientes de la mesa
 	var sauces := [] if prebuilt else _cat_options(r["cat"], "sauces")
@@ -4458,27 +4462,32 @@ func _build_plating_station() -> void:
 		var opts := [""] + sauces
 		for k in opts.size():
 			var s: String = opts[k]
-			var b := _prop(Rect2(x0 + (k % 4) * 84, y + 30 + (k / 4) * 92, 80, 88))
-			b.text = s if s != "" else "Sin salsa"
-			b.text_size = 10
+			var b := _prop(Rect2(x0 + (k % 5) * 80, y + 30 + (k / 5) * 108, 76, 104))
+			var sticker: String = s if s != "" else "Sin salsa"
 			b.selected = o["plate_sauce"] == s
 			if s == "":
-				b.draw_fn = func(ci, rr): Art.draw_none(ci, rr)
+				b.draw_fn = func(ci, rr):
+					Art.draw_none(ci, Rect2(rr.position + Vector2(8, 6), rr.size - Vector2(16, 36)))
+					Art.draw_sticker(ci, Rect2(rr.position.x + 2, rr.end.y - 26, rr.size.x - 4, 24), "Sin salsa")
 				b.tooltip_text = "Sacar la salsa"
 				b.pressed.connect(_set_plate_sauce.bind(""))
 			else:
 				var col: Color = Art.SAUCE_COLORS.get(s, Color.WHITE)
-				b.draw_fn = func(ci, rr): Art.draw_bottle(ci, rr, col)
+				if _ground_sauce(s):
+					sticker = "%s (%d)" % [s, int(salsa_stock.get(s, 0))]
+				var stxt := sticker
+				b.draw_fn = func(ci, rr):
+					Art.draw_sauce_bottle(ci, Rect2(rr.position, rr.size - Vector2(0, 28)), col)
+					Art.draw_sticker(ci, Rect2(rr.position.x + 2, rr.end.y - 26, rr.size.x - 4, 24), stxt)
 				b.drag_data = {"kind": "sauce", "name": s}
 				b.tooltip_text = "Arrastrá la salsa hasta el plato"
 				if _ground_sauce(s):
 					var left: int = salsa_stock.get(s, 0)
-					b.text = "%s (%d)" % [s, left]
 					if left <= 0:
 						b.modulate.a = 0.45
 					b.tooltip_text = "Salsa del molcajete: quedan %d porciones" % left
 				b.pressed.connect(_on_condiment_click.bind("sauce", s))
-		y += 30 + ceil(opts.size() / 4.0) * 92 + 4
+		y += 30 + ceil(opts.size() / 5.0) * 108 + 4
 	var tops := [] if prebuilt else _cat_options(r["cat"], "toppings")
 	if prebuilt:
 		_tag("Ya viene armada desde la otra estación", Vector2(x0, y), 15)
@@ -4486,7 +4495,7 @@ func _build_plating_station() -> void:
 		_tag("Toppings (mantené y desparramá)", Vector2(x0, y), 15)
 		for k in tops.size():
 			var tname: String = tops[k]
-			var b := _prop(Rect2(x0 + (k % 4) * 84, y + 30 + (k / 4) * 82, 80, 80))
+			var b := _prop(Rect2(x0 + (k % 5) * 80, y + 30 + (k / 5) * 96, 76, 92))
 			var pct := 0
 			if o["sprinkles"].has(tname):
 				pct = int(minf(o["sprinkles"][tname]["amount"], 1.0) * 100.0)
@@ -4494,10 +4503,13 @@ func _build_plating_station() -> void:
 			b.selected = tname in o["plate_toppings"]
 			var frac := pct / 100.0
 			b.draw_fn = func(ci, rr):
-				Art.draw_bowl(ci, rr, tname)
+				# El potecito con una pegatina con el nombre
+				var br := Rect2(rr.position, rr.size - Vector2(0, 22))
+				Art.draw_bowl(ci, br, tname)
+				Art.draw_sticker(ci, Rect2(rr.position.x + 1, rr.end.y - 26, rr.size.x - 2, 24), tname)
 				if frac > 0.0 and frac < 1.0:
-					var cc: Vector2 = rr.get_center()
-					var rad := minf(rr.size.x, rr.size.y) * 0.5
+					var cc: Vector2 = br.get_center()
+					var rad := minf(br.size.x, br.size.y) * 0.5
 					ci.draw_arc(cc, rad, 0, TAU, 32, Color(0, 0, 0, 0.25), 4)
 					ci.draw_arc(cc, rad, -PI / 2, -PI / 2 + TAU * frac, 32, Color("ffd166"), 4)
 			b.mouse_default_cursor_shape = Control.CURSOR_DRAG
@@ -4561,7 +4573,7 @@ func _build_delivery_station() -> void:
 		plate.dropped.connect(_delivery_drop)
 	station_box.add_child(plate)
 	if wants_drink:
-		_build_drinks_fridge(o, Rect2(352, 160, 126, 286))
+		_build_drinks_fridge(o, Rect2(934, 296, 338, 168))     # abajo, a la derecha de la campanita
 		if o.get("plate_drink", "") == "":
 			_tag("Falta la bebida: %s" % o["drink"], Vector2(330, 128), 14)
 		_build_wine_corner(o)
