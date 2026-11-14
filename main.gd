@@ -124,6 +124,7 @@ var sprinkle_cursor: Control = null
 var plating_plate = null         # el PlateView del emplatado (para saber dónde está el plato)
 var recipe_panel: Control = null
 var kitchen_views: Array = []        # aparatos dibujados en la cocina (para saber dónde está el salero)
+var kitchen_counter_y := -1.0         # dónde va la mesada: justo debajo de los aparatos
 var salting := false
 var salt_cursor: Control = null
 var salt_sound_t := 0.0
@@ -3031,7 +3032,7 @@ func _update_customer_views() -> void:
 
 func _build_kitchen_station() -> void:
 	var o = _get_order(selected_id)
-	var draw_bg := func(ci, _t): Art.draw_kitchen_wall(ci, Rect2(Vector2.ZERO, STATION_SIZE))
+	var draw_bg := func(ci, _t): Art.draw_kitchen_backdrop(ci, Rect2(Vector2.ZERO, STATION_SIZE), kitchen_counter_y)
 	_painter(Rect2(Vector2.ZERO, STATION_SIZE), draw_bg, false)
 	var header := "Lo que cocines va a la bandeja y sirve para cualquier pedido"
 	if o != null:
@@ -3065,6 +3066,7 @@ func _build_kitchen_station() -> void:
 
 	# Abajo de los aparatos: la receta del ticket elegido
 	var top := 36.0 + 330.0 * k + 6.0
+	kitchen_counter_y = top - 10.0
 	var fridge_items := cook_items.filter(func(id): return not Data.ITEMS[id].get("built", false))   # la pizza se arma en la mesa
 	var n := fridge_items.size()
 	var rw := x - 110.0 if n > 0 else 640.0     # sin heladera, la receta tiene más lugar
@@ -3106,14 +3108,7 @@ func _build_kitchen_station() -> void:
 		var rows_g := int(ceil(g[1].size() / float(cols)))
 		shelves.append([y0, g[0], y0 + head_h + rows_g * ch])
 		y0 += head_h + rows_g * ch
-	var draw_fridge := func(ci, _t):
-		Art.rrect(ci, Rect2(0, 0, fw, 430), Color("dfe5ea"), 10, Color("9aa3ab"), 4)
-		Art.rrect(ci, Rect2(8, 26, fw - 16, 396), Color("f6f9fb"), 6)
-		Art.text(ci, Vector2(0, 19), "HELADERA · arrastrá a la cocina", 13, Color("4a5560"), HORIZONTAL_ALIGNMENT_CENTER, fw)
-		for s in shelves:
-			Art.rrect(ci, Rect2(14, s[0] + 1, fw - 28, head_h - 3), Color(0.78, 0.84, 0.88, 0.6), 4)
-			Art.text(ci, Vector2(20, s[0] + 13), s[1].to_upper(), 11, Color("4a5560"))
-			ci.draw_rect(Rect2(8, s[2] - 4, fw - 16, 4), Color("c5ccd2"))
+	var draw_fridge := func(ci, _t): Art.draw_fridge_open(ci, Vector2(fw, 430), shelves, head_h)
 	if n > 0:
 		tip_refs["heladera"] = _painter(Rect2(fx, 30, fw, 430), draw_fridge, false)
 	else:

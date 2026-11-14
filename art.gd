@@ -3367,3 +3367,74 @@ static func draw_salon_decor(ci: CanvasItem, rect: Rect2, decor: Array, time: fl
 			ci.draw_line(p + Vector2(5, 0), p + Vector2(5, -18), col, 2)
 			if k % 2 == 0:
 				ci.draw_line(p + Vector2(5, -18), p + Vector2(13, -13), col, 2)
+
+
+# --- Cocina: fondo y heladera ---
+
+## Fondo de la estación de cocina: azulejos crema con guarda de color, luz cálida desde arriba,
+## riel con utensilios colgados y una mesada de acero donde apoyan los aparatos.
+static func draw_kitchen_backdrop(ci: CanvasItem, rect: Rect2, counter_y := -1.0) -> void:
+	var o := rect.position
+	tiles(ci, rect, Vector2(64, 30), Color("f6f1e6"), Color("d6cdbb"))
+	# Guarda de azulejos de color
+	var gy := o.y + 30.0
+	ci.draw_rect(Rect2(o.x, gy, rect.size.x, 14), Color("2f6f6a"))
+	for k in int(rect.size.x / 28.0) + 1:
+		var c := Vector2(o.x + k * 28.0 + 14.0, gy + 7.0)
+		ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-6, 0), c + Vector2(0, -5), c + Vector2(6, 0), c + Vector2(0, 5)]),
+			Color("e8b84a") if k % 2 == 0 else Color("d9623a"))
+	ci.draw_rect(Rect2(o.x, gy - 2, rect.size.x, 2), Color(0, 0, 0, 0.12))
+	ci.draw_rect(Rect2(o.x, gy + 14, rect.size.x, 2), Color(0, 0, 0, 0.12))
+	# La pared se oscurece hacia arriba y hacia los costados (da profundidad)
+	grad_rect(ci, Rect2(o, Vector2(rect.size.x, 120)), Color(0.25, 0.16, 0.08, 0.22), Color(0.25, 0.16, 0.08, 0.0))
+	# Mesada de acero cepillado con el frente en sombra
+	var cy := counter_y if counter_y > 0.0 else rect.end.y - 104.0
+	grad_rect(ci, Rect2(o.x, cy, rect.size.x, 18), Color("e9edf0"), Color("b4bcc3"))
+	ci.draw_rect(Rect2(o.x, cy, rect.size.x, 2), Color(1, 1, 1, 0.7))
+	grad_rect(ci, Rect2(o.x, cy + 18, rect.size.x, rect.end.y - cy - 18), Color("8d969e"), Color("5f6870"))
+	for k in int(rect.size.x / 6.0):
+		ci.draw_line(Vector2(o.x + k * 6.0, cy + 18), Vector2(o.x + k * 6.0, rect.end.y), Color(1, 1, 1, 0.03 + 0.02 * (k % 3)), 1)
+	ci.draw_rect(Rect2(o.x, cy + 18, rect.size.x, 5), Color(0, 0, 0, 0.25))
+	# Sombra de contacto de los aparatos sobre la mesada
+	grad_rect(ci, Rect2(o.x, cy - 26, rect.size.x, 26), Color(0, 0, 0, 0.0), Color(0, 0, 0, 0.16))
+
+
+## Heladera abierta de acero: marco con brillo, interior frío iluminado desde arriba,
+## estantes de vidrio con su cartelito y una bruma fría abajo. shelves = [[y título, nombre, y estante], ...]
+static func draw_fridge_open(ci: CanvasItem, size: Vector2, shelves: Array, head_h: float) -> void:
+	var w := size.x
+	var h := size.y
+	# Cuerpo de acero con brillo vertical
+	rrect(ci, Rect2(4, 6, w, h), Color(0, 0, 0, 0.22), 14)
+	rrect(ci, Rect2(0, 0, w, h), Color("c9d1d8"), 14, Color("8e98a2"), 3)
+	grad_rect(ci, Rect2(4, 4, w - 8, 22), Color("f2f5f7"), Color("b9c2ca"))
+	text(ci, Vector2(0, 20), "HELADERA  ·  arrastrá a la cocina", 13, Color("3d4852"), HORIZONTAL_ALIGNMENT_CENTER, w)
+	# Interior: frío, más claro arriba (la luz) y azulado abajo
+	var inner := Rect2(10, 28, w - 20, h - 38)
+	rrect(ci, inner.grow(2), Color("7f8a94"), 8)
+	grad_rect(ci, inner, Color("fbfdff"), Color("d6e6f2"))
+	# Luz LED arriba
+	rrect(ci, Rect2(inner.position.x + inner.size.x * 0.25, inner.position.y + 2, inner.size.x * 0.5, 5), Color(1, 1, 0.9, 0.95), 3)
+	grad_rect(ci, Rect2(inner.position, Vector2(inner.size.x, 60)), Color(1, 1, 0.85, 0.35), Color(1, 1, 0.85, 0.0))
+	# Paredes laterales con ranuras
+	for side in [0, 1]:
+		var x := inner.position.x if side == 0 else inner.end.x - 6
+		ci.draw_rect(Rect2(x, inner.position.y, 6, inner.size.y), Color(0.55, 0.65, 0.72, 0.25))
+	# Estantes de vidrio con cartelito
+	for s in shelves:
+		var ty: float = s[0]
+		var sy: float = s[2]
+		rrect(ci, Rect2(18, ty + 1, 150, head_h - 3), Color("2f6f6a"), 5)
+		text(ci, Vector2(26, ty + 13), String(s[1]).to_upper(), 11, Color("f4f1e6"))
+		ci.draw_rect(Rect2(inner.position.x, sy - 6, inner.size.x, 5), Color(0.72, 0.86, 0.94, 0.75))
+		ci.draw_rect(Rect2(inner.position.x, sy - 6, inner.size.x, 1.5), Color(1, 1, 1, 0.9))
+		ci.draw_rect(Rect2(inner.position.x, sy - 1, inner.size.x, 3), Color(0.3, 0.42, 0.5, 0.25))
+	# Bruma fría abajo
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 31
+	for k in 9:
+		ellipse(ci, Vector2(inner.position.x + rng.randf() * inner.size.x, inner.end.y - rng.randf_range(4, 22)),
+			Vector2(rng.randf_range(40, 90), rng.randf_range(8, 16)), Color(1, 1, 1, 0.16))
+	# Burlete y manija de la puerta (a la derecha)
+	ci.draw_rect(Rect2(w - 9, 30, 3, h - 44), Color("5f6870"))
+	rrect(ci, Rect2(w - 7, h * 0.3, 5, h * 0.3), Color("eef2f5"), 3)
